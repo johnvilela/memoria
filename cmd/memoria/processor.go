@@ -25,7 +25,7 @@ var invokeProcessor = func(cfg config, prompt string) (string, error) {
 	case "claude-code":
 		return runProcessorCmd("claude", []string{"-p"}, prompt)
 	case "codex":
-		return runProcessorCmd("codex", []string{"exec"}, prompt)
+		return runProcessorCmd("codex", []string{"exec", "-"}, prompt)
 	case "gemini":
 		return invokeGemini(cfg, prompt)
 	case "ollama":
@@ -37,12 +37,15 @@ var invokeProcessor = func(cfg config, prompt string) (string, error) {
 	}
 }
 
-// runProcessorCmd executes an AI CLI with the prompt as final arg. cwd = temp
-// dir and MEMORIA_NO_CAPTURE keep the nested agent session out of memoria.
+// runProcessorCmd executes an AI CLI with the prompt on stdin — argv has a
+// ~128KiB per-arg kernel limit (E2BIG) that wiki+digest prompts easily blow.
+// cwd = temp dir and MEMORIA_NO_CAPTURE keep the nested agent session out of
+// memoria.
 func runProcessorCmd(bin string, args []string, prompt string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), processorTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, bin, append(args, prompt)...)
+	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd.Stdin = strings.NewReader(prompt)
 	cmd.Dir = os.TempDir()
 	cmd.Env = append(os.Environ(), "MEMORIA_NO_CAPTURE=1")
 	var stderr strings.Builder
