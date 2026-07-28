@@ -39,16 +39,18 @@ Differentiator vs. existing solutions: hooks + cronjobs + markdown files, human-
 |---------|--------|-------------|
 | `help` / `--help` / `-h` | done | ASCII art + command list |
 | `init <claude-code\|codex>` | done | Install memoria hooks globally for the chosen agent |
+| `bootstrap` | done | Register the current folder (name + path) as a tracked project in config.yaml |
 | `hook <name>` | done (internal) | Called by agent hooks; captures session data |
 
 ## How hooks flow
 
 1. `memoria init claude-code` merges command hooks into `~/.claude/settings.json` (Codex: `~/.codex/hooks.json`, same JSON shape; Codex lacks the Notification event and needs one-time `/hooks` trust in its TUI). Idempotent; preserves existing settings/hooks; uses the absolute binary path.
 2. Each agent event runs `memoria hook <canonical-name>` with a JSON payload on stdin (`session_id`, `cwd`, `hook_event_name`, ...). Canonical names: `session-start user-prompt pre-tool-use post-tool-use pre-compact post-compact notification stop session-end subagent-start subagent-stop`; unknown names log as `other`.
-3. Hooks are global, but capture only happens for projects opted-in via `~/.config/memoria/config.yaml`:
+3. Hooks are global, but capture only happens for projects opted-in via `~/.config/memoria/config.yaml`. Run `memoria bootstrap` inside a project to register it (idempotent):
    ```yaml
    projects:
-     - /home/me/dev/some-project
+     - name: some-project
+       path: /home/me/dev/some-project
    ```
    `cwd` is matched by longest path prefix; untracked projects are silently ignored.
 4. Captured lines append chronologically to `<project>/.memoria/sessions/<session_id>.md` as `DATETIME - HOOK_NAME - DATA` (RFC3339 local time, full compact JSON payload).

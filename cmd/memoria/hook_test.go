@@ -15,7 +15,7 @@ func testConfig(t *testing.T, projects ...string) string {
 	var b strings.Builder
 	b.WriteString("projects:\n")
 	for _, p := range projects {
-		fmt.Fprintf(&b, "  - %s\n", p)
+		fmt.Fprintf(&b, "  - name: %s\n    path: %s\n", filepath.Base(p), p)
 	}
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	if err := os.WriteFile(path, []byte(b.String()), 0o644); err != nil {
@@ -129,9 +129,9 @@ func TestCaptureHookRejectsBadSessionID(t *testing.T) {
 
 func TestMatchProject(t *testing.T) {
 	cases := []struct {
-		cwd      string
-		projects []string
-		want     string
+		cwd   string
+		paths []string
+		want  string
 	}{
 		{"/a/proj", []string{"/a/proj"}, "/a/proj"},
 		{"/a/proj/sub", []string{"/a/proj"}, "/a/proj"},
@@ -141,8 +141,12 @@ func TestMatchProject(t *testing.T) {
 		{"/elsewhere", []string{"/a/proj"}, ""},
 	}
 	for _, tc := range cases {
-		if got := matchProject(tc.cwd, tc.projects); got != tc.want {
-			t.Errorf("matchProject(%q, %v) = %q, want %q", tc.cwd, tc.projects, got, tc.want)
+		var projects []project
+		for _, p := range tc.paths {
+			projects = append(projects, project{Name: filepath.Base(p), Path: p})
+		}
+		if got := matchProject(tc.cwd, projects); got != tc.want {
+			t.Errorf("matchProject(%q, %v) = %q, want %q", tc.cwd, tc.paths, got, tc.want)
 		}
 	}
 }

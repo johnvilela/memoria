@@ -8,8 +8,13 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+type project struct {
+	Name string `yaml:"name"`
+	Path string `yaml:"path"`
+}
+
 type config struct {
-	Projects []string `yaml:"projects"`
+	Projects []project `yaml:"projects"`
 }
 
 func loadConfig(path string) (config, error) {
@@ -21,6 +26,17 @@ func loadConfig(path string) (config, error) {
 	return c, yaml.Unmarshal(b, &c)
 }
 
+func saveConfig(path string, c config) error {
+	b, err := yaml.Marshal(c)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(path, b, 0o644)
+}
+
 func defaultConfigPath() string {
 	dir, err := os.UserConfigDir()
 	if err != nil {
@@ -29,15 +45,15 @@ func defaultConfigPath() string {
 	return filepath.Join(dir, "memoria", "config.yaml")
 }
 
-// matchProject returns the longest tracked project that contains cwd, or "".
-func matchProject(cwd string, projects []string) string {
+// matchProject returns the longest tracked project path that contains cwd, or "".
+func matchProject(cwd string, projects []project) string {
 	cwd = filepath.Clean(cwd)
 	best := ""
 	for _, p := range projects {
-		p = filepath.Clean(p)
-		if cwd == p || strings.HasPrefix(cwd, p+string(filepath.Separator)) {
-			if len(p) > len(best) {
-				best = p
+		path := filepath.Clean(p.Path)
+		if cwd == path || strings.HasPrefix(cwd, path+string(filepath.Separator)) {
+			if len(path) > len(best) {
+				best = path
 			}
 		}
 	}
