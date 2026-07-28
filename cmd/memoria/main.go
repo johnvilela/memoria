@@ -34,7 +34,9 @@ func run(args []string, stdin io.Reader, out io.Writer) int {
 	case "hook":
 		// must never block the agent: silent, always 0, nothing on stdout
 		if len(args) > 1 {
-			_ = captureHook(args[1], stdin, defaultConfigPath())
+			if err := captureHook(args[1], stdin, defaultConfigPath()); err != nil {
+				logf("hook", "%s: %v", args[1], err)
+			}
 		}
 		return 0
 	default:
