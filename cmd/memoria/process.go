@@ -316,22 +316,15 @@ func validPagePath(p string) bool {
 	return false
 }
 
-// loadWikiPrompt returns the user-editable prompt, materializing the embedded
-// default next to the config on first use.
+// loadWikiPrompt returns the prompt from the file next to the config if the
+// user created one, else the embedded default.
 func loadWikiPrompt(configPath string) (string, error) {
 	return loadPromptFile(configPath, "wiki-prompt.md", defaultWikiPrompt)
 }
 
 func loadPromptFile(configPath, name, def string) (string, error) {
-	p := filepath.Join(filepath.Dir(configPath), name)
-	b, err := os.ReadFile(p)
+	b, err := os.ReadFile(filepath.Join(filepath.Dir(configPath), name))
 	if os.IsNotExist(err) {
-		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
-			return "", err
-		}
-		if err := os.WriteFile(p, []byte(def), 0o644); err != nil {
-			return "", err
-		}
 		return def, nil
 	}
 	if err != nil {

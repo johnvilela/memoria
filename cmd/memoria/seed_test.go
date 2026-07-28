@@ -78,8 +78,8 @@ func TestSeedWiki(t *testing.T) {
 	if strings.Contains(*prompt, "OUTPUT FORMAT") {
 		t.Fatal("prompt has the Go-appended contract; seed-prompt.md carries its own")
 	}
-	if _, err := os.Stat(filepath.Join(filepath.Dir(cfgPath), "seed-prompt.md")); err != nil {
-		t.Fatalf("seed-prompt.md not materialized: %v", err)
+	if _, err := os.Stat(filepath.Join(filepath.Dir(cfgPath), "seed-prompt.md")); !os.IsNotExist(err) {
+		t.Fatalf("embedded default should not be written to disk: %v", err)
 	}
 	if !strings.Contains(buf.String(), "index.md") {
 		t.Fatalf("output should list written pages: %q", buf.String())

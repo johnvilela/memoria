@@ -82,8 +82,8 @@ func TestLintWritesReport(t *testing.T) {
 	if e := st[filepath.Base(proj)]; e.State != "done" || !strings.Contains(e.Detail, "1 finding") {
 		t.Fatalf("done status wrong: %+v", e)
 	}
-	if _, err := os.Stat(filepath.Join(filepath.Dir(cfgPath), "lint-prompt.md")); err != nil {
-		t.Fatalf("lint prompt not materialized: %v", err)
+	if _, err := os.Stat(filepath.Join(filepath.Dir(cfgPath), "lint-prompt.md")); !os.IsNotExist(err) {
+		t.Fatalf("embedded default should not be written to disk: %v", err)
 	}
 }
 

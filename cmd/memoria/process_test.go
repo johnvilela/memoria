@@ -210,7 +210,7 @@ func TestProcessApplyWithoutProposal(t *testing.T) {
 	}
 }
 
-func TestWikiPromptMaterializedAndEditable(t *testing.T) {
+func TestWikiPromptOverride(t *testing.T) {
 	proj, cfgPath, _ := processFixture(t)
 	stubProcessor(t, goodProposalPages, nil)
 	var buf bytes.Buffer
@@ -218,8 +218,8 @@ func TestWikiPromptMaterializedAndEditable(t *testing.T) {
 		t.Fatalf("process = %d: %s", code, buf.String())
 	}
 	pp := filepath.Join(filepath.Dir(cfgPath), "wiki-prompt.md")
-	if _, err := os.Stat(pp); err != nil {
-		t.Fatalf("prompt file not materialized: %v", err)
+	if _, err := os.Stat(pp); !os.IsNotExist(err) {
+		t.Fatalf("embedded default should not be written to disk: %v", err)
 	}
 	if err := os.WriteFile(pp, []byte("CUSTOM RULES ONLY\n"), 0o644); err != nil {
 		t.Fatal(err)
