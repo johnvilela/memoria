@@ -190,3 +190,94 @@ func TestBootstrapGitignoreNoDuplicate(t *testing.T) {
 		t.Fatalf(".gitignore = %q, entry duplicated", b)
 	}
 }
+
+func TestBootstrapWritesAgentsBlock(t *testing.T) {
+	proj := t.TempDir()
+	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+	var out strings.Builder
+	if code := runBootstrap(proj, cfgPath, "", false, false, &out); code != 0 {
+		t.Fatalf("exit = %d (out: %s)", code, out.String())
+	}
+	b, err := os.ReadFile(filepath.Join(proj, "AGENTS.md"))
+	if err != nil {
+		t.Fatalf("AGENTS.md not created: %v", err)
+	}
+	s := string(b)
+	if !strings.Contains(s, "<!-- memoria:start -->") || !strings.Contains(s, "<!-- memoria:end -->") {
+		t.Fatalf("markers missing: %q", s)
+	}
+	if !strings.Contains(s, "wiki/index.md") {
+		t.Fatalf("wiki folder not referenced: %q", s)
+	}
+	c, err := os.ReadFile(filepath.Join(proj, "CLAUDE.md"))
+	if err != nil || !strings.Contains(string(c), "Read [AGENTS.md](AGENTS.md)") {
+		t.Fatalf("CLAUDE.md shim = %q, %v", c, err)
+	}
+}
+
+func TestBootstrapAppendsToExistingAgents(t *testing.T) {
+	proj := t.TempDir()
+	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+	existing := "# My Project\n\nsome docs"
+	if err := os.WriteFile(filepath.Join(proj, "AGENTS.md"), []byte(existing), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	claude := "# CLAUDE.md\n\ncustom claude instructions\n"
+	if err := os.WriteFile(filepath.Join(proj, "CLAUDE.md"), []byte(claude), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out strings.Builder
+	if code := runBootstrap(proj, cfgPath, "", false, false, &out); code != 0 {
+		t.Fatalf("exit = %d (out: %s)", code, out.String())
+	}
+	b, _ := os.ReadFile(filepath.Join(proj, "AGENTS.md"))
+	if !strings.HasPrefix(string(b), "# My Project\n\nsome docs\n\n<!-- memoria:start -->") {
+		t.Fatalf("existing content mangled: %q", b)
+	}
+	c, _ := os.ReadFile(filepath.Join(proj, "CLAUDE.md"))
+	if string(c) != claude {
+		t.Fatalf("existing CLAUDE.md touched: %q", c)
+	}
+}
+
+func TestBootstrapRepairsBlockOnRerun(t *testing.T) {
+	proj := t.TempDir()
+	cfgPath := testConfig(t, proj)
+	agents := filepath.Join(proj, "AGENTS.md")
+	stale := "# Docs\n\n<!-- memoria:start -->\nSTALE INSTRUCTIONS\n<!-- memoria:end -->\n\n## After\n"
+	if err := os.WriteFile(agents, []byte(stale), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out strings.Builder
+	if code := runBootstrap(proj, cfgPath, "", false, false, &out); code != 0 {
+		t.Fatalf("exit = %d (out: %s)", code, out.String())
+	}
+	b, _ := os.ReadFile(agents)
+	s := string(b)
+	if strings.Contains(s, "STALE INSTRUCTIONS") {
+		t.Fatalf("block not replaced: %q", s)
+	}
+	if !strings.HasPrefix(s, "# Docs\n\n<!-- memoria:start -->") || !strings.Contains(s, "\n\n## After\n") {
+		t.Fatalf("surrounding content mangled: %q", s)
+	}
+	if strings.Count(s, "<!-- memoria:start -->") != 1 || strings.Count(s, "<!-- memoria:end -->") != 1 {
+		t.Fatalf("markers duplicated: %q", s)
+	}
+}
+
+func TestBootstrapBlockUsesCustomWikiName(t *testing.T) {
+	proj := t.TempDir()
+	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+	cfg := config{Projects: []project{{Name: "p", Path: proj, Wiki: "kb"}}}
+	if err := saveConfig(cfgPath, cfg); err != nil {
+		t.Fatal(err)
+	}
+	var out strings.Builder
+	if code := runBootstrap(proj, cfgPath, "", false, false, &out); code != 0 {
+		t.Fatalf("exit = %d (out: %s)", code, out.String())
+	}
+	b, _ := os.ReadFile(filepath.Join(proj, "AGENTS.md"))
+	if !strings.Contains(string(b), "kb/index.md") {
+		t.Fatalf("custom wiki name missing: %q", b)
+	}
+}

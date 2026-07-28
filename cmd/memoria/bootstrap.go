@@ -33,6 +33,7 @@ func runBootstrap(cwd, configPath, wikiName string, background, seedForeground b
 			if folder == "" {
 				folder = "wiki"
 			}
+			writeAgentsFiles(cwd, folder, out)
 			if len(readWiki(filepath.Join(cwd, folder))) > 0 {
 				return 0
 			}
@@ -71,7 +72,60 @@ func runBootstrap(cwd, configPath, wikiName string, background, seedForeground b
 		return 1
 	}
 	fmt.Fprintf(out, "Registered %s (%s)\n", filepath.Base(cwd), cwd)
+	writeAgentsFiles(cwd, folder, out)
 	return maybeSeedWiki(cfg, project{Name: filepath.Base(cwd), Path: cwd, Wiki: wikiName}, configPath, background, out)
+}
+
+const memoriaBlockTmpl = `<!-- memoria:start -->
+## Project memory (memoria)
+
+Curated long-term memory from past agent sessions lives in ` + "`%s/`" + `:
+decisions made, rules to follow, gotchas hit, concepts explained.
+Before non-trivial changes: read ` + "`%s/index.md`" + `, then grep ` + "`%s/`" + `
+for keywords. Pages carry YAML ` + "`tags:`" + ` frontmatter for topic lookup.
+<!-- memoria:end -->`
+
+// writeAgentsFiles puts the recall instructions into <proj>/AGENTS.md —
+// replacing an existing marker block, else appending — and creates a
+// CLAUDE.md shim when none exists. Warn-only: registration and seeding must
+// survive an unwritable file.
+func writeAgentsFiles(proj, folder string, out io.Writer) {
+	if err := writeAgentsBlock(proj, folder); err != nil {
+		fmt.Fprintln(out, "warning:", err)
+		return
+	}
+	fmt.Fprintln(out, "Wrote project memory instructions to AGENTS.md")
+}
+
+func writeAgentsBlock(proj, folder string) error {
+	const start, end = "<!-- memoria:start -->", "<!-- memoria:end -->"
+	block := fmt.Sprintf(memoriaBlockTmpl, folder, folder, folder)
+	path := filepath.Join(proj, "AGENTS.md")
+	b, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	s := string(b)
+	if i, j := strings.Index(s, start), strings.Index(s, end); i >= 0 && j > i {
+		s = s[:i] + block + s[j+len(end):]
+	} else {
+		if s != "" && !strings.HasSuffix(s, "\n") {
+			s += "\n"
+		}
+		if s != "" {
+			s += "\n"
+		}
+		s += block + "\n"
+	}
+	if err := os.WriteFile(path, []byte(s), 0o644); err != nil {
+		return err
+	}
+	claudePath := filepath.Join(proj, "CLAUDE.md")
+	if _, err := os.Stat(claudePath); os.IsNotExist(err) {
+		shim := "# CLAUDE.md\n\nRead [AGENTS.md](AGENTS.md) for project context.\n"
+		return os.WriteFile(claudePath, []byte(shim), 0o644)
+	}
+	return nil
 }
 
 // addGitignoreEntry appends ".memoria/" to <proj>/.gitignore, creating the
