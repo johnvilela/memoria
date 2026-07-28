@@ -49,6 +49,13 @@ func run(args []string, stdin io.Reader, out io.Writer) int {
 			return 1
 		}
 		return runLint(cwd, defaultConfigPath(), args[1:], out)
+	case "search":
+		cwd, err := os.Getwd()
+		if err != nil {
+			fmt.Fprintln(out, "error:", err)
+			return 1
+		}
+		return runSearch(cwd, defaultConfigPath(), args[1:], out)
 	case "status":
 		return runStatus(defaultConfigPath(), out)
 	case "hook":
