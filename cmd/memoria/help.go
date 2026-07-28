@@ -23,7 +23,7 @@ type command struct {
 var commands = []command{
 	{name: "help", desc: "Show this help screen"},
 	{name: "init", desc: "Install code-agent hooks globally (claude-code | codex)"},
-	{name: "bootstrap", desc: "Register current folder as a tracked project"},
+	{name: "bootstrap", desc: "Register current folder as a tracked project (--wiki <name>)"},
 	{name: "hook", desc: "Receive hook data from a code agent", internal: true},
 }
 

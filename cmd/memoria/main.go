@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -18,12 +19,18 @@ func run(args []string, stdin io.Reader, out io.Writer) int {
 	case "init":
 		return runInit(args[1:], out)
 	case "bootstrap":
+		fs := flag.NewFlagSet("bootstrap", flag.ContinueOnError)
+		fs.SetOutput(out)
+		wiki := fs.String("wiki", "", "wiki folder name (default \"wiki\")")
+		if err := fs.Parse(args[1:]); err != nil {
+			return 1
+		}
 		cwd, err := os.Getwd()
 		if err != nil {
 			fmt.Fprintln(out, "error:", err)
 			return 1
 		}
-		return runBootstrap(cwd, defaultConfigPath(), out)
+		return runBootstrap(cwd, defaultConfigPath(), *wiki, out)
 	case "hook":
 		// must never block the agent: silent, always 0, nothing on stdout
 		if len(args) > 1 {

@@ -11,6 +11,7 @@ import (
 type project struct {
 	Name string `yaml:"name"`
 	Path string `yaml:"path"`
+	Wiki string `yaml:"wiki,omitempty"` // wiki folder name; empty means "wiki"
 }
 
 type config struct {
