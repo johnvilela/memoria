@@ -175,6 +175,72 @@ func TestCaptureHookSessionEndFirstEvent(t *testing.T) {
 	}
 }
 
+func TestReopenedSessionGetsNewIncarnation(t *testing.T) {
+	proj := t.TempDir()
+	cfg := testConfig(t, proj)
+	processed := filepath.Join(proj, ".memoria", "sessions", "processed")
+	if err := os.MkdirAll(processed, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := captureHook("user-prompt", promptPayload("s1", proj, "round one"), cfg); err != nil {
+		t.Fatal(err)
+	}
+	// simulate process --apply: digest moves to processed/
+	if err := os.Rename(digestFile(proj, "s1"), filepath.Join(processed, "s1.md")); err != nil {
+		t.Fatal(err)
+	}
+
+	// user reopens the session
+	if err := captureHook("user-prompt", promptPayload("s1", proj, "round two"), cfg); err != nil {
+		t.Fatal(err)
+	}
+	inc2 := filepath.Join(proj, ".memoria", "sessions", "pending", "s1-2.md")
+	b, err := os.ReadFile(inc2)
+	if err != nil {
+		t.Fatalf("s1-2.md not created: %v", err)
+	}
+	if !strings.Contains(string(b), "continues_from: ../processed/s1.md") {
+		t.Fatalf("missing continues_from:\n%s", b)
+	}
+	if !strings.Contains(string(b), "round two") {
+		t.Fatalf("event line missing:\n%s", b)
+	}
+	if _, err := os.Stat(filepath.Join(processed, "s1.md")); err != nil {
+		t.Fatal("original left processed/")
+	}
+
+	// further events keep appending to the same incarnation
+	if err := captureHook("user-prompt", promptPayload("s1", proj, "still round two"), cfg); err != nil {
+		t.Fatal(err)
+	}
+	b, _ = os.ReadFile(inc2)
+	if strings.Count(string(b), "---") != 2 || !strings.Contains(string(b), "still round two") {
+		t.Fatalf("did not append to s1-2.md:\n%s", b)
+	}
+
+	// queue points at the new incarnation
+	qb, _ := os.ReadFile(queuePath(cfg))
+	if !strings.Contains(string(qb), "s1-2.md") {
+		t.Fatalf("queue missing s1-2.md:\n%s", qb)
+	}
+
+	// second reopen: s1-2 processed too -> s1-3, linked to s1-2
+	if err := os.Rename(inc2, filepath.Join(processed, "s1-2.md")); err != nil {
+		t.Fatal(err)
+	}
+	if err := captureHook("user-prompt", promptPayload("s1", proj, "round three"), cfg); err != nil {
+		t.Fatal(err)
+	}
+	b, err = os.ReadFile(filepath.Join(proj, ".memoria", "sessions", "pending", "s1-3.md"))
+	if err != nil {
+		t.Fatalf("s1-3.md not created: %v", err)
+	}
+	if !strings.Contains(string(b), "continues_from: ../processed/s1-2.md") {
+		t.Fatalf("s1-3 not linked to s1-2:\n%s", b)
+	}
+}
+
 func TestCaptureHookSubdirCwd(t *testing.T) {
 	proj := t.TempDir()
 	sub := filepath.Join(proj, "src", "deep")

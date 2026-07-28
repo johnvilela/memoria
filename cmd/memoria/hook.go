@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -167,35 +168,85 @@ func captureHook(name string, stdin io.Reader, configPath string) error {
 	if proj == "" {
 		return nil
 	}
-	projName := filepath.Base(proj)
-	for _, p := range cfg.Projects {
-		if filepath.Clean(p.Path) == proj {
-			projName = p.Name
-		}
-	}
+	projName := projectAt(cfg, proj).Name
 	if name == "user-prompt" {
 		prompt, _ := payload["prompt"].(string)
 		if err := indexSession(proj, sid, prompt); err != nil {
 			return err
 		}
 	}
-	return appendDigest(proj, projName, sid, name, payload)
+	return appendDigest(proj, projName, sid, name, payload, queuePath(configPath))
+}
+
+// incarnationName returns the digest file name of the nth incarnation of a
+// session: sid.md, then sid-2.md, sid-3.md for reopens after processing.
+func incarnationName(sid string, n int) string {
+	if n <= 1 {
+		return sid + ".md"
+	}
+	return fmt.Sprintf("%s-%d.md", sid, n)
+}
+
+// maxIncarnation returns the highest incarnation of sid present in dir (0 = none).
+func maxIncarnation(dir, sid string) int {
+	max := 0
+	if _, err := os.Stat(filepath.Join(dir, sid+".md")); err == nil {
+		max = 1
+	}
+	entries, _ := os.ReadDir(dir)
+	for _, e := range entries {
+		mid, ok := strings.CutPrefix(e.Name(), sid+"-")
+		if !ok {
+			continue
+		}
+		mid, ok = strings.CutSuffix(mid, ".md")
+		if !ok {
+			continue
+		}
+		if n, err := strconv.Atoi(mid); err == nil && n > max {
+			max = n
+		}
+	}
+	return max
+}
+
+// resolveDigestPath picks the live digest file for a session. A pending
+// incarnation wins; otherwise a session whose digest was already processed
+// gets a fresh numbered incarnation linked to the processed one.
+func resolveDigestPath(proj, sid string) (path, continuesFrom string) {
+	pending := filepath.Join(proj, ".memoria", "sessions", "pending")
+	processed := filepath.Join(proj, ".memoria", "sessions", "processed")
+	if n := maxIncarnation(pending, sid); n > 0 {
+		return filepath.Join(pending, incarnationName(sid, n)), ""
+	}
+	if n := maxIncarnation(processed, sid); n > 0 {
+		return filepath.Join(pending, incarnationName(sid, n+1)),
+			"../processed/" + incarnationName(sid, n)
+	}
+	return filepath.Join(pending, sid+".md"), ""
 }
 
 // appendDigest ensures the digest file exists (frontmatter written on first
-// event, whichever hook that is) and appends the rendered event line.
-func appendDigest(proj, projName, sid, name string, payload map[string]any) error {
+// event, whichever hook that is), appends the rendered event line, and keeps
+// the central pending queue in sync.
+func appendDigest(proj, projName, sid, name string, payload map[string]any, queueFile string) error {
 	line := renderEvent(name, payload)
 	if line == "" {
 		return nil
 	}
-	path := filepath.Join(proj, ".memoria", "sessions", "pending", sid+".md")
+	path, continuesFrom := resolveDigestPath(proj, sid)
 	now := time.Now().Format(time.RFC3339)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
+	created := false
 	// O_EXCL: only the first event of a session writes the frontmatter
 	if f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644); err == nil {
+		created = true
+		link := ""
+		if continuesFrom != "" {
+			link = "continues_from: " + continuesFrom + "\n"
+		}
 		fmt.Fprintf(f, `---
 schema_version: 2
 kind: session-digest
@@ -203,9 +254,9 @@ session_id: %s
 project: %s
 project_root: %s
 started_at: %s
----
+%s---
 
-`, sid, projName, proj, now)
+`, sid, projName, proj, now, link)
 		f.Close()
 	} else if !os.IsExist(err) {
 		return err
@@ -220,8 +271,23 @@ started_at: %s
 		return err
 	}
 	defer f.Close()
-	_, err = fmt.Fprintln(f, line)
-	return err
+	if _, err := fmt.Fprintln(f, line); err != nil {
+		return err
+	}
+	// queue last: a queue failure never blocks the digest, only gets logged
+	if created {
+		if err := queueAdd(queueFile, projName, path); err != nil {
+			return err
+		}
+		// a new session implicitly ends the project's previous ones
+		if err := queueEndOthers(queueFile, projName, path); err != nil {
+			return err
+		}
+	}
+	if name == "session-end" {
+		return queueMarkEnded(queueFile, projName, path)
+	}
+	return nil
 }
 
 // setEndedAt inserts or updates "ended_at:" in the digest's frontmatter.

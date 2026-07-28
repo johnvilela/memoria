@@ -15,7 +15,9 @@ type project struct {
 }
 
 type config struct {
-	Projects []project `yaml:"projects"`
+	Projects     []project `yaml:"projects"`
+	Processor    string    `yaml:"processor,omitempty"`      // AI provider that processes sessions into wiki/memories
+	GeminiAPIKey string    `yaml:"gemini_api_key,omitempty"` // only when processor is gemini
 }
 
 func loadConfig(path string) (config, error) {
@@ -35,7 +37,8 @@ func saveConfig(path string, c config) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(path, b, 0o644)
+	// 0600: the config can hold an API key
+	return os.WriteFile(path, b, 0o600)
 }
 
 func defaultConfigPath() string {
@@ -44,6 +47,16 @@ func defaultConfigPath() string {
 		return ""
 	}
 	return filepath.Join(dir, "memoria", "config.yaml")
+}
+
+// projectAt returns the config entry for a project root (fallback: bare name).
+func projectAt(cfg config, root string) project {
+	for _, p := range cfg.Projects {
+		if filepath.Clean(p.Path) == root {
+			return p
+		}
+	}
+	return project{Name: filepath.Base(root), Path: root}
 }
 
 // matchProject returns the longest tracked project path that contains cwd, or "".
