@@ -332,3 +332,49 @@ func TestHookCommandIsSilentAndAlwaysZero(t *testing.T) {
 		}
 	}
 }
+
+func TestInitAddsGitignore(t *testing.T) {
+	initEnv(t)
+	dir := gitDir(t, false)
+	t.Chdir(dir)
+	code, out := runInitCmd(t, "claude-code")
+	if code != 0 {
+		t.Fatalf("init = %d: %s", code, out)
+	}
+	b, err := os.ReadFile(filepath.Join(dir, ".gitignore"))
+	if err != nil {
+		t.Fatal(".gitignore not created:", err)
+	}
+	if !strings.Contains(string(b), ".memoria/") {
+		t.Fatalf(".gitignore = %q, missing .memoria/", b)
+	}
+}
+
+func TestInitGitignoreAppendsExisting(t *testing.T) {
+	initEnv(t)
+	dir := gitDir(t, false)
+	gi := filepath.Join(dir, ".gitignore")
+	if err := os.WriteFile(gi, []byte("node_modules"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(dir)
+	if code, out := runInitCmd(t, "claude-code"); code != 0 {
+		t.Fatalf("init = %d: %s", code, out)
+	}
+	b, _ := os.ReadFile(gi)
+	if got := string(b); got != "node_modules\n.memoria/\n" {
+		t.Fatalf(".gitignore = %q, want existing content preserved + entry", got)
+	}
+}
+
+func TestInitSkipsGitignoreOutsideGitRepo(t *testing.T) {
+	initEnv(t)
+	dir := t.TempDir()
+	t.Chdir(dir)
+	if code, out := runInitCmd(t, "claude-code"); code != 0 {
+		t.Fatalf("init = %d: %s", code, out)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".gitignore")); !os.IsNotExist(err) {
+		t.Fatal(".gitignore created outside a git repo")
+	}
+}

@@ -88,6 +88,7 @@ func runInit(args []string, configPath string, out io.Writer) int {
 	if code := installClientHooks(client, out, usage); code != 0 {
 		return code
 	}
+	ensureGitignore(out)
 
 	if *processor == "" && isTTY() {
 		v, err := selectOption("Which provider should process sessions into wiki/memories?", processorOptions)
@@ -110,6 +111,21 @@ func runInit(args []string, configPath string, out io.Writer) int {
 	}
 	maybeSeedWiki(configPath, out)
 	return 0
+}
+
+// ensureGitignore adds .memoria/ to cwd's .gitignore (creating it if missing)
+// when cwd is a git repo. Best-effort: init never fails over it.
+func ensureGitignore(out io.Writer) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return
+	}
+	if _, err := os.Stat(filepath.Join(cwd, ".git")); err != nil {
+		return
+	}
+	if err := addGitignoreEntry(cwd); err != nil {
+		fmt.Fprintln(out, "warning: could not update .gitignore:", err)
+	}
 }
 
 var seedOptions = []option{
