@@ -12,7 +12,7 @@ func TestBootstrapFreshConfig(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), "memoria", "config.yaml")
 
 	var out strings.Builder
-	if code := runBootstrap(proj, cfgPath, "", &out); code != 0 {
+	if code := runBootstrap(proj, cfgPath, "", false, false, &out); code != 0 {
 		t.Fatalf("exit = %d, want 0 (out: %s)", code, out.String())
 	}
 	if !strings.Contains(out.String(), "Registered") {
@@ -35,7 +35,7 @@ func TestBootstrapAppendsToExisting(t *testing.T) {
 	cfgPath := testConfig(t, existing)
 
 	var out strings.Builder
-	if code := runBootstrap(proj, cfgPath, "", &out); code != 0 {
+	if code := runBootstrap(proj, cfgPath, "", false, false, &out); code != 0 {
 		t.Fatalf("exit = %d, want 0", code)
 	}
 	cfg, err := loadConfig(cfgPath)
@@ -52,7 +52,7 @@ func TestBootstrapIdempotent(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
 
 	var out strings.Builder
-	if code := runBootstrap(proj, cfgPath, "", &out); code != 0 {
+	if code := runBootstrap(proj, cfgPath, "", false, false, &out); code != 0 {
 		t.Fatalf("first run exit = %d", code)
 	}
 	before, err := os.ReadFile(cfgPath)
@@ -61,7 +61,7 @@ func TestBootstrapIdempotent(t *testing.T) {
 	}
 
 	out.Reset()
-	if code := runBootstrap(proj, cfgPath, "", &out); code != 0 {
+	if code := runBootstrap(proj, cfgPath, "", false, false, &out); code != 0 {
 		t.Fatalf("second run exit = %d, want 0", code)
 	}
 	if !strings.Contains(out.String(), "already registered") {
@@ -82,7 +82,7 @@ func TestBootstrapMalformedConfig(t *testing.T) {
 	}
 
 	var out strings.Builder
-	if code := runBootstrap(proj, cfgPath, "", &out); code != 1 {
+	if code := runBootstrap(proj, cfgPath, "", false, false, &out); code != 1 {
 		t.Fatalf("exit = %d, want 1", code)
 	}
 	b, _ := os.ReadFile(cfgPath)
@@ -96,7 +96,7 @@ func TestBootstrapCreatesWikiAndGitignore(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
 
 	var out strings.Builder
-	if code := runBootstrap(proj, cfgPath, "", &out); code != 0 {
+	if code := runBootstrap(proj, cfgPath, "", false, false, &out); code != 0 {
 		t.Fatalf("exit = %d, want 0 (out: %s)", code, out.String())
 	}
 	if _, err := os.Stat(filepath.Join(proj, "wiki", ".gitkeep")); err != nil {
@@ -119,7 +119,7 @@ func TestBootstrapWikiExistsFails(t *testing.T) {
 	}
 
 	var out strings.Builder
-	if code := runBootstrap(proj, cfgPath, "", &out); code != 1 {
+	if code := runBootstrap(proj, cfgPath, "", false, false, &out); code != 1 {
 		t.Fatalf("exit = %d, want 1 (out: %s)", code, out.String())
 	}
 	if _, err := os.Stat(cfgPath); !os.IsNotExist(err) {
@@ -139,7 +139,7 @@ func TestBootstrapCustomWikiName(t *testing.T) {
 	}
 
 	var out strings.Builder
-	if code := runBootstrap(proj, cfgPath, "docs", &out); code != 0 {
+	if code := runBootstrap(proj, cfgPath, "docs", false, false, &out); code != 0 {
 		t.Fatalf("exit = %d, want 0 (out: %s)", code, out.String())
 	}
 	if _, err := os.Stat(filepath.Join(proj, "docs", ".gitkeep")); err != nil {
@@ -164,7 +164,7 @@ func TestBootstrapGitignoreAppend(t *testing.T) {
 	}
 
 	var out strings.Builder
-	if code := runBootstrap(proj, cfgPath, "", &out); code != 0 {
+	if code := runBootstrap(proj, cfgPath, "", false, false, &out); code != 0 {
 		t.Fatalf("exit = %d, want 0", code)
 	}
 	b, _ := os.ReadFile(gi)
@@ -182,7 +182,7 @@ func TestBootstrapGitignoreNoDuplicate(t *testing.T) {
 	}
 
 	var out strings.Builder
-	if code := runBootstrap(proj, cfgPath, "", &out); code != 0 {
+	if code := runBootstrap(proj, cfgPath, "", false, false, &out); code != 0 {
 		t.Fatalf("exit = %d, want 0", code)
 	}
 	b, _ := os.ReadFile(gi)

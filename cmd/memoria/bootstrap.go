@@ -9,9 +9,11 @@ import (
 )
 
 // runBootstrap registers cwd as a tracked project in the config file,
-// gitignores .memoria/ and creates the wiki folder (wikiName, default "wiki";
-// custom names are saved in the config). An existing wiki folder is an error.
-func runBootstrap(cwd, configPath, wikiName string, out io.Writer) int {
+// gitignores .memoria/, creates the wiki folder (wikiName, default "wiki";
+// custom names are saved in the config) and offers to seed it from git
+// history. An existing wiki folder is an error. seedForeground is the
+// internal child mode spawned by --background: seed only, no registration.
+func runBootstrap(cwd, configPath, wikiName string, background, seedForeground bool, out io.Writer) int {
 	cwd = filepath.Clean(cwd)
 
 	cfg, err := loadConfig(configPath)
@@ -20,11 +22,22 @@ func runBootstrap(cwd, configPath, wikiName string, out io.Writer) int {
 		fmt.Fprintln(out, "error:", err)
 		return 1
 	}
+	if seedForeground {
+		return runSeedForeground(cfg, cwd, configPath, out)
+	}
 
 	for _, p := range cfg.Projects {
 		if filepath.Clean(p.Path) == cwd {
 			fmt.Fprintf(out, "%s already registered\n", cwd)
-			return 0
+			folder := p.Wiki
+			if folder == "" {
+				folder = "wiki"
+			}
+			if len(readWiki(filepath.Join(cwd, folder))) > 0 {
+				return 0
+			}
+			// registered but the wiki never got pages — still offer seeding
+			return maybeSeedWiki(cfg, p, configPath, background, out)
 		}
 	}
 
@@ -58,7 +71,7 @@ func runBootstrap(cwd, configPath, wikiName string, out io.Writer) int {
 		return 1
 	}
 	fmt.Fprintf(out, "Registered %s (%s)\n", filepath.Base(cwd), cwd)
-	return 0
+	return maybeSeedWiki(cfg, project{Name: filepath.Base(cwd), Path: cwd, Wiki: wikiName}, configPath, background, out)
 }
 
 // addGitignoreEntry appends ".memoria/" to <proj>/.gitignore, creating the

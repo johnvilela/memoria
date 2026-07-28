@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -106,11 +105,7 @@ func runInit(args []string, configPath string, out io.Writer) int {
 		}
 		*notification, notifSet = v == "enabled", true
 	}
-	if code := saveInitConfig(*processor, *notification, notifSet, configPath, out); code != 0 {
-		return code
-	}
-	maybeSeedWiki(configPath, out)
-	return 0
+	return saveInitConfig(*processor, *notification, notifSet, configPath, out)
 }
 
 // ensureGitignore adds .memoria/ to cwd's .gitignore (creating it if missing)
@@ -126,107 +121,6 @@ func ensureGitignore(out io.Writer) {
 	if err := addGitignoreEntry(cwd); err != nil {
 		fmt.Fprintln(out, "warning: could not update .gitignore:", err)
 	}
-}
-
-var seedOptions = []option{
-	{"no", "No", "start with an empty wiki"},
-	{"yes", "Yes", "may take a while — runs in this terminal, don't close it"},
-}
-
-// maybeSeedWiki offers to bootstrap the wiki from git history + code. Only in
-// a TTY, only with a processor configured, only when the repo has commits.
-// Best-effort: a refusal or failure never fails init.
-func maybeSeedWiki(configPath string, out io.Writer) {
-	if !isTTY() {
-		return
-	}
-	cwd, err := os.Getwd()
-	if err != nil || !hasCommits(cwd) {
-		return
-	}
-	cfg, err := loadConfig(configPath)
-	if err != nil || cfg.Processor == "" {
-		return
-	}
-	v, err := selectOption("Auto-generate the wiki from the existing git history and code?", seedOptions)
-	if err != nil || v != "yes" {
-		return
-	}
-	wikiName := projectAt(cfg, matchProject(cwd, cfg.Projects)).Wiki
-	if wikiName == "" {
-		wikiName = "wiki"
-	}
-	err = withSpinner("Generating wiki from git history and code (this can take a few minutes)...", func() error {
-		return seedWiki(cfg, cwd, filepath.Join(cwd, wikiName), configPath, out)
-	})
-	if err != nil {
-		fmt.Fprintln(out, "error: wiki generation failed:", err)
-	}
-}
-
-func hasCommits(dir string) bool {
-	return exec.Command("git", "-C", dir, "rev-parse", "--verify", "HEAD").Run() == nil
-}
-
-// seedWiki asks the processor for wiki pages built from the repo's git log,
-// file tree and README, then validates and writes them (same trust boundary
-// as process --apply).
-func seedWiki(cfg config, dir, wikiRoot, configPath string, out io.Writer) error {
-	rules, err := loadWikiPrompt(configPath)
-	if err != nil {
-		return err
-	}
-	raw, err := invokeProcessor(cfg, buildSeedPrompt(rules, dir))
-	if err != nil {
-		return err
-	}
-	jsonStr, err := extractJSON(raw)
-	if err != nil {
-		return err
-	}
-	var pp struct {
-		Pages []wikiPage `json:"pages"`
-	}
-	if err := json.Unmarshal([]byte(jsonStr), &pp); err != nil {
-		return fmt.Errorf("processor returned invalid JSON: %w", err)
-	}
-	if err := validatePages(pp.Pages); err != nil {
-		return err
-	}
-	for _, pg := range pp.Pages {
-		dst := filepath.Join(wikiRoot, filepath.FromSlash(pg.Path))
-		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-			return err
-		}
-		if err := os.WriteFile(dst, []byte(pg.Content), 0o644); err != nil {
-			return err
-		}
-		fmt.Fprintf(out, "wrote %s\n", dst)
-	}
-	fmt.Fprintf(out, "Wiki seeded with %d page(s) in %s\n", len(pp.Pages), wikiRoot)
-	return nil
-}
-
-// ponytail: context = git log + file tree + README; deep per-file code
-// reading when this proves too shallow.
-func buildSeedPrompt(rules, dir string) string {
-	git := func(args ...string) string {
-		out, _ := exec.Command("git", append([]string{"-C", dir}, args...)...).Output()
-		return string(out)
-	}
-	var b strings.Builder
-	b.WriteString(rules)
-	b.WriteString("\n\nThe wiki is empty. Seed it from this project's git history and code:\n")
-	b.WriteString("\n--- GIT LOG (newest first) ---\n" + git("log", "--oneline", "-n", "300"))
-	b.WriteString("\n--- FILES ---\n" + git("ls-files"))
-	for _, n := range []string{"README.md", "README"} {
-		if rb, err := os.ReadFile(filepath.Join(dir, n)); err == nil {
-			b.WriteString("\n--- " + n + " ---\n" + string(rb) + "\n")
-			break
-		}
-	}
-	b.WriteString("\n--- OUTPUT FORMAT ---\n" + jsonContract + "\n")
-	return b.String()
 }
 
 // saveInitConfig persists every init choice in a single config write, then

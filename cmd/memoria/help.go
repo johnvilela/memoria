@@ -26,7 +26,7 @@ var commands = []command{
 	{name: "process", desc: "Consolidate pending sessions into the project wiki in the background (review, then --apply)"},
 	{name: "lint", desc: "Audit the wiki for contradictions in the background (--review, --apply a fix, --deny \"why\")"},
 	{name: "status", desc: "Show background processing state per project"},
-	{name: "bootstrap", desc: "Register current folder as a tracked project (--wiki <name>)"},
+	{name: "bootstrap", desc: "Register current folder as a tracked project and seed the wiki from git history (--wiki <name>, --background)"},
 	{name: "hook", desc: "Receive hook data from a code agent", internal: true},
 }
 

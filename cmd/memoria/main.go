@@ -22,6 +22,8 @@ func run(args []string, stdin io.Reader, out io.Writer) int {
 		fs := flag.NewFlagSet("bootstrap", flag.ContinueOnError)
 		fs.SetOutput(out)
 		wiki := fs.String("wiki", "", "wiki folder name (default \"wiki\")")
+		background := fs.Bool("background", false, "seed the wiki from git history in a detached background run")
+		seedFg := fs.Bool("seed-foreground", false, "internal: run the seed inline (spawned by --background)")
 		if err := fs.Parse(args[1:]); err != nil {
 			return 1
 		}
@@ -30,7 +32,7 @@ func run(args []string, stdin io.Reader, out io.Writer) int {
 			fmt.Fprintln(out, "error:", err)
 			return 1
 		}
-		return runBootstrap(cwd, defaultConfigPath(), *wiki, out)
+		return runBootstrap(cwd, defaultConfigPath(), *wiki, *background, *seedFg, out)
 	case "process":
 		cwd, err := os.Getwd()
 		if err != nil {
