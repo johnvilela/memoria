@@ -1,0 +1,100 @@
+package main
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/url"
+	"os"
+	"os/exec"
+	"strings"
+	"time"
+)
+
+const processorTimeout = 10 * time.Minute
+
+// var so tests can point it at a httptest server
+var geminiGenerateURL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
+
+// invokeProcessor sends the prompt to the configured processor and returns
+// its raw text output. Var so tests can stub the whole call.
+var invokeProcessor = func(cfg config, prompt string) (string, error) {
+	switch cfg.Processor {
+	case "claude-code":
+		return runProcessorCmd("claude", []string{"-p"}, prompt)
+	case "codex":
+		return runProcessorCmd("codex", []string{"exec"}, prompt)
+	case "gemini":
+		return invokeGemini(cfg, prompt)
+	case "ollama":
+		return "", fmt.Errorf("ollama processor coming soon")
+	case "":
+		return "", fmt.Errorf("no processor configured — run memoria init")
+	default:
+		return "", fmt.Errorf("unknown processor %q", cfg.Processor)
+	}
+}
+
+// runProcessorCmd executes an AI CLI with the prompt as final arg. cwd = temp
+// dir and MEMORIA_NO_CAPTURE keep the nested agent session out of memoria.
+func runProcessorCmd(bin string, args []string, prompt string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), processorTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, bin, append(args, prompt)...)
+	cmd.Dir = os.TempDir()
+	cmd.Env = append(os.Environ(), "MEMORIA_NO_CAPTURE=1")
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("%s: %w (%s)", bin, err, collapse(stderr.String(), 200))
+	}
+	return string(out), nil
+}
+
+func invokeGemini(cfg config, prompt string) (string, error) {
+	key := os.Getenv("GEMINI_API_KEY")
+	if key == "" {
+		key = cfg.GeminiAPIKey
+	}
+	if key == "" {
+		return "", fmt.Errorf("gemini needs an API key — set GEMINI_API_KEY or run memoria init")
+	}
+	body, err := json.Marshal(map[string]any{
+		"contents": []map[string]any{{"parts": []map[string]string{{"text": prompt}}}},
+	})
+	if err != nil {
+		return "", err
+	}
+	c := &http.Client{Timeout: processorTimeout}
+	resp, err := c.Post(geminiGenerateURL+"?key="+url.QueryEscape(key), "application/json", bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("gemini: status %s", resp.Status)
+	}
+	var r struct {
+		Candidates []struct {
+			Content struct {
+				Parts []struct {
+					Text string `json:"text"`
+				} `json:"parts"`
+			} `json:"content"`
+		} `json:"candidates"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
+		return "", err
+	}
+	if len(r.Candidates) == 0 {
+		return "", fmt.Errorf("gemini: no candidates in response")
+	}
+	var sb strings.Builder
+	for _, p := range r.Candidates[0].Content.Parts {
+		sb.WriteString(p.Text)
+	}
+	return strings.TrimSpace(sb.String()), nil
+}

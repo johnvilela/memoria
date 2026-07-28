@@ -17,7 +17,7 @@ func run(args []string, stdin io.Reader, out io.Writer) int {
 		fmt.Fprintln(out, renderHelp())
 		return 0
 	case "init":
-		return runInit(args[1:], out)
+		return runInit(args[1:], defaultConfigPath(), out)
 	case "bootstrap":
 		fs := flag.NewFlagSet("bootstrap", flag.ContinueOnError)
 		fs.SetOutput(out)
@@ -31,6 +31,13 @@ func run(args []string, stdin io.Reader, out io.Writer) int {
 			return 1
 		}
 		return runBootstrap(cwd, defaultConfigPath(), *wiki, out)
+	case "process":
+		cwd, err := os.Getwd()
+		if err != nil {
+			fmt.Fprintln(out, "error:", err)
+			return 1
+		}
+		return runProcess(cwd, defaultConfigPath(), args[1:], out)
 	case "hook":
 		// must never block the agent: silent, always 0, nothing on stdout
 		if len(args) > 1 {

@@ -18,7 +18,7 @@ Differentiator vs. existing solutions: hooks + cronjobs + markdown files, human-
 
 - Go, entrypoint in `cmd/memoria/` (no Go files in repo root); build with `go build -o memoria ./cmd/memoria`
 - CLI dispatch: stdlib `os.Args` switch — no cobra/urfave
-- TUI/styling: charmbracelet/lipgloss (bubbles will be added when an interactive TUI feature lands)
+- TUI/styling: charmbracelet/lipgloss + bubbletea/bubbles (interactive selects and inputs live in `tui.go`)
 - Module: `github.com/jv77/memoria`
 
 ## Conventions
@@ -32,14 +32,16 @@ Differentiator vs. existing solutions: hooks + cronjobs + markdown files, human-
 - `scripts/build.sh` — host binary at `./memoria`; `scripts/build.sh all` → `dist/` for linux/darwin × amd64/arm64
 - `scripts/install.sh` — installs to `$BIN_DIR` (default `~/.local/bin`); in-repo builds local checkout, standalone go-installs `@latest` (curl-able from github later)
 - `scripts/test.sh` — `go vet` + `go test -race`, extra args pass through (`scripts/test.sh -v -run TestX`)
+- `scripts/dev.sh` — dev loop: build the local checkout and install to `$BIN_DIR` (wraps `install.sh`)
 
 ## Commands
 
 | Command | Status | Description |
 |---------|--------|-------------|
 | `help` / `--help` / `-h` | done | ASCII art + command list |
-| `init <claude-code\|codex>` | done | Install memoria hooks globally for the chosen agent |
+| `init [<client>] [--client ...] [--processor ...]` | done | Install memoria hooks for an agent (claude-code \| codex) and choose the session processor (claude-code \| codex \| ollama \| gemini). Flags are scriptable; omitted ones prompt via bubbles TUI (TTY only). Processor is saved to config and verified warn-only (CLI on PATH; gemini key against the models endpoint). Gemini key: `GEMINI_API_KEY` env, existing config, or masked prompt — saved as `gemini_api_key`. Ollama is a placeholder (auto-install coming soon) |
 | `bootstrap` | done | Register the current folder (name + path) as a tracked project in config.yaml; gitignores `.memoria/` and creates the wiki folder |
+| `process [--apply]` | done | Consolidate ended pending sessions into the project wiki via the configured processor. Two-step: writes `.memoria/proposal.json` for review, `--apply` creates the files |
 | `hook <name>` | done (internal) | Called by agent hooks; appends events to the session digest |
 
 ## How hooks flow
@@ -51,11 +53,27 @@ Differentiator vs. existing solutions: hooks + cronjobs + markdown files, human-
    projects:
      - name: some-project
        path: /home/me/dev/some-project
+   processor: claude-code       # set by memoria init; processes sessions into wiki/memories
+   gemini_api_key: ...          # only when processor is gemini; config written 0600
    ```
    `cwd` is matched by longest path prefix; untracked projects are silently ignored. Bootstrap also appends `.memoria/` to the project's `.gitignore` (captures stay untracked) and creates `wiki/` with a `.gitkeep` (the curated wiki is meant to be versioned). An existing wiki folder is an error — pick another name with `--wiki <name>`, saved as `wiki:` on the project entry (empty = `wiki`).
-4. Captured events append chronologically to the session digest at `<project>/.memoria/sessions/pending/<session_id>.md` as `@hook` annotated lines (see "How digests flow"). Events not worth digesting write nothing: `pre-tool-use`, `notification`, `subagent-start`, unknown hooks, and tools other than Write/Edit/NotebookEdit/Bash.
+4. Captured events append chronologically to the session digest at `<project>/.memoria/sessions/pending/<session_id>.md` as `@hook` annotated lines (see "How digests flow"). Events not worth digesting write nothing: `pre-tool-use`, `notification`, `subagent-start`, unknown hooks, and tools other than Write/Edit/NotebookEdit/Bash. Reopening a session whose digest was already processed starts a new incarnation (`resolveDigestPath` in `hook.go`): `<sid>-2.md`, `<sid>-3.md`, ... in pending/, frontmatter `continues_from: ../processed/<previous>.md`; the processed original is never touched.
 5. `<project>/.memoria/sessions.md` indexes sessions as `DATETIME - SESSION_ID - NAME` — the name is the session's first user prompt (whitespace-collapsed, truncated to 80 runes). One entry per session id.
-6. `memoria hook` must NEVER block an agent: always exits 0, never writes stdout (some agents inject hook stdout as model context).
+6. Creating a digest also registers its absolute path in `~/.config/memoria/pending.yaml` (`queue.go`) — the central worklist `memoria process` consumes, grouped by project name. An entry becomes `ended: true` when `session-end` fires OR when a new session starts in the same project (`queueEndOthers` — crashed/abandoned sessions don't stay pending forever). Append + dedupe only; `process --apply` removes entries:
+   ```yaml
+   memoria:
+     - path: /home/me/dev/memoria/.memoria/sessions/pending/abc-123.md
+       ended: true
+   ```
+7. `memoria hook` must NEVER block an agent: always exits 0, never writes stdout (some agents inject hook stdout as model context).
+
+## How processing flows
+
+1. `memoria process` (inside a tracked project) collects this project's `ended: true` queue entries whose digest file still exists. None → "Nothing to process".
+2. Prompt = `~/.config/memoria/wiki-prompt.md` (user-editable; materialized from a go:embed default on first run — FAITHFULNESS first, category definitions, wikilinks, no negative ontologies) + full current wiki content + session digests + a Go-appended JSON output contract (kept out of the editable file so edits can't break parsing).
+3. The configured processor runs it (`processor.go`): `claude-code` → `claude -p`, `codex` → `codex exec` (both with cwd = temp dir + `MEMORIA_NO_CAPTURE=1` as recursion guards, 10-min timeout), `gemini` → `generateContent` REST call, `ollama` → "coming soon" error.
+4. The LLM returns `{"pages":[{"action","path","title","content"}]}` — it NEVER writes files. Go validates every page (path is `index.md` or under `concepts/ decisions/ gotchas/ rules/`, `.md` only, no traversal, nothing empty; any violation rejects the whole proposal) and writes `.memoria/proposal.json` with project/sessions metadata.
+5. After human review, `memoria process --apply` re-validates, writes the pages under the wiki folder, moves the digests to `.memoria/sessions/processed/`, removes their queue entries, and deletes the proposal.
 
 ## How digests flow
 

@@ -9,8 +9,10 @@ import (
 
 // TestMain disables logging so unrelated tests never touch the real
 // ~/.config/memoria/memoria.log; log tests redirect logPath themselves.
+// isTTY is forced false so init tests never open the interactive TUI.
 func TestMain(m *testing.M) {
 	logPath = ""
+	isTTY = func() bool { return false }
 	os.Exit(m.Run())
 }
 

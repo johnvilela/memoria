@@ -1,0 +1,280 @@
+package main
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+// tracked project with one ended pending session and an existing wiki page
+func processFixture(t *testing.T) (proj, cfgPath, digest string) {
+	t.Helper()
+	proj = t.TempDir()
+	cfgPath = testConfig(t, proj)
+	digest = digestFile(proj, "s1")
+	if err := os.MkdirAll(filepath.Dir(digest), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := "---\nkind: session-digest\n---\n\n@user-prompt 'add a queue'\n@post-tool-use Write /p/queue.go\n"
+	if err := os.WriteFile(digest, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := queueAdd(queuePath(cfgPath), filepath.Base(proj), digest); err != nil {
+		t.Fatal(err)
+	}
+	if err := queueMarkEnded(queuePath(cfgPath), filepath.Base(proj), digest); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(proj, "wiki"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	existing := filepath.Join(proj, "wiki", "index.md")
+	if err := os.WriteFile(existing, []byte("# Index\n\nold index\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return proj, cfgPath, digest
+}
+
+// stubProcessor replaces invokeProcessor, capturing the prompt
+func stubProcessor(t *testing.T, response string, err error) *string {
+	t.Helper()
+	var prompt string
+	orig := invokeProcessor
+	invokeProcessor = func(cfg config, p string) (string, error) {
+		prompt = p
+		return response, err
+	}
+	t.Cleanup(func() { invokeProcessor = orig })
+	return &prompt
+}
+
+const goodProposalPages = `{"pages":[
+	{"action":"update","path":"index.md","title":"Index","content":"# Index\n\n[[queue]]\n"},
+	{"action":"create","path":"concepts/queue.md","title":"Queue","content":"# Queue\n\nHow the queue works.\n"}
+]}`
+
+func TestProcessWritesProposal(t *testing.T) {
+	proj, cfgPath, digest := processFixture(t)
+	prompt := stubProcessor(t, "```json\n"+goodProposalPages+"\n```", nil)
+	var buf bytes.Buffer
+	if code := runProcess(proj, cfgPath, nil, &buf); code != 0 {
+		t.Fatalf("process = %d: %s", code, buf.String())
+	}
+	b, err := os.ReadFile(filepath.Join(proj, ".memoria", "proposal.json"))
+	if err != nil {
+		t.Fatalf("proposal not written: %v", err)
+	}
+	var p proposal
+	if err := json.Unmarshal(b, &p); err != nil {
+		t.Fatal(err)
+	}
+	if p.Project != filepath.Base(proj) || len(p.Sessions) != 1 || p.Sessions[0] != digest || len(p.Pages) != 2 {
+		t.Fatalf("proposal meta wrong: %+v", p)
+	}
+	for _, w := range []string{"FAITHFULNESS", "old index", "add a queue", `"pages"`} {
+		if !strings.Contains(*prompt, w) {
+			t.Fatalf("prompt missing %q", w)
+		}
+	}
+	if !strings.Contains(buf.String(), "concepts/queue.md") || !strings.Contains(buf.String(), "--apply") {
+		t.Fatalf("summary missing: %s", buf.String())
+	}
+}
+
+func TestProcessNothingPending(t *testing.T) {
+	proj := t.TempDir()
+	cfgPath := testConfig(t, proj)
+	stubProcessor(t, "", fmt.Errorf("must not be called"))
+	var buf bytes.Buffer
+	if code := runProcess(proj, cfgPath, nil, &buf); code != 0 {
+		t.Fatalf("process = %d: %s", code, buf.String())
+	}
+	if !strings.Contains(buf.String(), "Nothing to process") {
+		t.Fatalf("missing message: %s", buf.String())
+	}
+}
+
+func TestProcessSkipsUnendedSessions(t *testing.T) {
+	proj, cfgPath, digest := processFixture(t)
+	// add a second, un-ended session — only the ended one may reach the prompt
+	d2 := digestFile(proj, "s2")
+	if err := os.WriteFile(d2, []byte("@user-prompt 'unfinished work'\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := queueAdd(queuePath(cfgPath), filepath.Base(proj), d2); err != nil {
+		t.Fatal(err)
+	}
+	prompt := stubProcessor(t, goodProposalPages, nil)
+	var buf bytes.Buffer
+	if code := runProcess(proj, cfgPath, nil, &buf); code != 0 {
+		t.Fatalf("process = %d: %s", code, buf.String())
+	}
+	if strings.Contains(*prompt, "unfinished work") {
+		t.Fatal("un-ended session leaked into prompt")
+	}
+	var p proposal
+	b, _ := os.ReadFile(filepath.Join(proj, ".memoria", "proposal.json"))
+	if err := json.Unmarshal(b, &p); err != nil {
+		t.Fatal(err)
+	}
+	if len(p.Sessions) != 1 || p.Sessions[0] != digest {
+		t.Fatalf("sessions = %v, want only ended", p.Sessions)
+	}
+}
+
+func TestProcessRejectsBadPages(t *testing.T) {
+	for _, bad := range []string{
+		`{"pages":[{"action":"create","path":"../evil.md","title":"x","content":"y"}]}`,
+		`{"pages":[{"action":"create","path":"secrets/x.md","title":"x","content":"y"}]}`,
+		`{"pages":[{"action":"create","path":"concepts/x.txt","title":"x","content":"y"}]}`,
+		`{"pages":[{"action":"delete","path":"concepts/x.md","title":"x","content":"y"}]}`,
+		`{"pages":[{"action":"create","path":"concepts/x.md","title":"","content":""}]}`,
+		`{"pages":[]}`,
+		`not json at all`,
+	} {
+		proj, cfgPath, _ := processFixture(t)
+		stubProcessor(t, bad, nil)
+		var buf bytes.Buffer
+		if code := runProcess(proj, cfgPath, nil, &buf); code != 1 {
+			t.Fatalf("bad proposal %q accepted: %d %s", bad, code, buf.String())
+		}
+		if _, err := os.Stat(filepath.Join(proj, ".memoria", "proposal.json")); !os.IsNotExist(err) {
+			t.Fatalf("proposal written despite invalid pages: %q", bad)
+		}
+	}
+}
+
+func TestProcessApply(t *testing.T) {
+	proj, cfgPath, digest := processFixture(t)
+	stubProcessor(t, goodProposalPages, nil)
+	var buf bytes.Buffer
+	if code := runProcess(proj, cfgPath, nil, &buf); code != 0 {
+		t.Fatalf("process = %d: %s", code, buf.String())
+	}
+	buf.Reset()
+	if code := runProcess(proj, cfgPath, []string{"--apply"}, &buf); code != 0 {
+		t.Fatalf("apply = %d: %s", code, buf.String())
+	}
+	b, err := os.ReadFile(filepath.Join(proj, "wiki", "concepts", "queue.md"))
+	if err != nil || !strings.Contains(string(b), "How the queue works") {
+		t.Fatalf("wiki page not written: %v %q", err, b)
+	}
+	b, _ = os.ReadFile(filepath.Join(proj, "wiki", "index.md"))
+	if !strings.Contains(string(b), "[[queue]]") {
+		t.Fatalf("index not updated: %q", b)
+	}
+	if _, err := os.Stat(digest); !os.IsNotExist(err) {
+		t.Fatal("digest still in pending/")
+	}
+	moved := filepath.Join(proj, ".memoria", "sessions", "processed", "s1.md")
+	if _, err := os.Stat(moved); err != nil {
+		t.Fatalf("digest not moved to processed/: %v", err)
+	}
+	qb, _ := os.ReadFile(queuePath(cfgPath))
+	if strings.Contains(string(qb), "s1.md") {
+		t.Fatalf("queue entry not removed:\n%s", qb)
+	}
+	if _, err := os.Stat(filepath.Join(proj, ".memoria", "proposal.json")); !os.IsNotExist(err) {
+		t.Fatal("proposal.json not deleted after apply")
+	}
+}
+
+func TestProcessApplyRejectsTamperedProposal(t *testing.T) {
+	proj, cfgPath, digest := processFixture(t)
+	p := proposal{Project: filepath.Base(proj), Sessions: []string{digest},
+		Pages: []wikiPage{{Action: "create", Path: "../../evil.md", Title: "x", Content: "y"}}}
+	b, _ := json.Marshal(p)
+	if err := os.WriteFile(filepath.Join(proj, ".memoria", "proposal.json"), b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	if code := runProcess(proj, cfgPath, []string{"--apply"}, &buf); code != 1 {
+		t.Fatalf("tampered proposal applied: %d %s", code, buf.String())
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(proj), "evil.md")); !os.IsNotExist(err) {
+		t.Fatal("escaped the wiki root")
+	}
+}
+
+func TestProcessApplyWithoutProposal(t *testing.T) {
+	proj, cfgPath, _ := processFixture(t)
+	var buf bytes.Buffer
+	if code := runProcess(proj, cfgPath, []string{"--apply"}, &buf); code != 1 {
+		t.Fatalf("apply without proposal = %d, want 1", code)
+	}
+}
+
+func TestWikiPromptMaterializedAndEditable(t *testing.T) {
+	proj, cfgPath, _ := processFixture(t)
+	stubProcessor(t, goodProposalPages, nil)
+	var buf bytes.Buffer
+	if code := runProcess(proj, cfgPath, nil, &buf); code != 0 {
+		t.Fatalf("process = %d: %s", code, buf.String())
+	}
+	pp := filepath.Join(filepath.Dir(cfgPath), "wiki-prompt.md")
+	if _, err := os.Stat(pp); err != nil {
+		t.Fatalf("prompt file not materialized: %v", err)
+	}
+	if err := os.WriteFile(pp, []byte("CUSTOM RULES ONLY\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	prompt := stubProcessor(t, goodProposalPages, nil)
+	if code := runProcess(proj, cfgPath, nil, &buf); code != 0 {
+		t.Fatalf("second process = %d: %s", code, buf.String())
+	}
+	if !strings.Contains(*prompt, "CUSTOM RULES ONLY") || strings.Contains(*prompt, "FAITHFULNESS") {
+		t.Fatal("user-edited prompt file not respected")
+	}
+}
+
+func TestExtractJSON(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{`{"a":1}`, `{"a":1}`},
+		{"```json\n{\"a\":1}\n```", `{"a":1}`},
+		{"here you go:\n{\"a\":1}\ndone", `{"a":1}`},
+	}
+	for _, tc := range cases {
+		got, err := extractJSON(tc.in)
+		if err != nil || got != tc.want {
+			t.Fatalf("extractJSON(%q) = %q, %v", tc.in, got, err)
+		}
+	}
+	if _, err := extractJSON("no braces here"); err == nil {
+		t.Fatal("want error for missing JSON")
+	}
+}
+
+func TestInvokeGemini(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("key") != "k123" {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+		fmt.Fprintln(w, `{"candidates":[{"content":{"parts":[{"text":"{\"pages\":[]}"}]}}]}`)
+	}))
+	defer srv.Close()
+	orig := geminiGenerateURL
+	geminiGenerateURL = srv.URL
+	defer func() { geminiGenerateURL = orig }()
+	t.Setenv("GEMINI_API_KEY", "")
+
+	out, err := invokeProcessor(config{Processor: "gemini", GeminiAPIKey: "k123"}, "hi")
+	if err != nil || out != `{"pages":[]}` {
+		t.Fatalf("gemini = %q, %v", out, err)
+	}
+	if _, err := invokeProcessor(config{Processor: "gemini", GeminiAPIKey: "bad"}, "hi"); err == nil {
+		t.Fatal("bad key should error")
+	}
+	if _, err := invokeProcessor(config{Processor: "ollama"}, "hi"); err == nil || !strings.Contains(err.Error(), "coming soon") {
+		t.Fatalf("ollama placeholder: %v", err)
+	}
+	if _, err := invokeProcessor(config{}, "hi"); err == nil {
+		t.Fatal("no processor should error")
+	}
+}
