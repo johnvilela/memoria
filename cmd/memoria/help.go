@@ -22,8 +22,10 @@ type command struct {
 
 var commands = []command{
 	{name: "help", desc: "Show this help screen"},
-	{name: "init", desc: "Install code-agent hooks and choose the session processor (--client, --processor)"},
-	{name: "process", desc: "Consolidate pending sessions into the project wiki (review, then --apply)"},
+	{name: "init", desc: "Install code-agent hooks and choose the session processor (--client, --processor, --notification)"},
+	{name: "process", desc: "Consolidate pending sessions into the project wiki in the background (review, then --apply)"},
+	{name: "lint", desc: "Audit the wiki for contradictions in the background (--review, --apply a fix, --deny \"why\")"},
+	{name: "status", desc: "Show background processing state per project"},
 	{name: "bootstrap", desc: "Register current folder as a tracked project (--wiki <name>)"},
 	{name: "hook", desc: "Receive hook data from a code agent", internal: true},
 }
