@@ -40,7 +40,7 @@ func hookCommands(t *testing.T, settings map[string]any, event string) []string 
 
 func TestInstallHooksFreshClaude(t *testing.T) {
 	path := filepath.Join(t.TempDir(), ".claude", "settings.json")
-	if err := installHooks(claudeEvents, path, "/opt/bin/memoria"); err != nil {
+	if err := installHooks(claudeEvents, path, "/opt/bin/memoria", "claude-code"); err != nil {
 		t.Fatal(err)
 	}
 	s := readSettings(t, path)
@@ -49,10 +49,10 @@ func TestInstallHooksFreshClaude(t *testing.T) {
 		t.Fatalf("claude events installed = %d, want 11", len(hooks))
 	}
 	cmds := hookCommands(t, s, "SessionStart")
-	if len(cmds) != 1 || cmds[0] != "/opt/bin/memoria hook session-start" {
+	if len(cmds) != 1 || cmds[0] != "/opt/bin/memoria hook session-start --client claude-code" {
 		t.Fatalf("SessionStart command = %v", cmds)
 	}
-	if got := hookCommands(t, s, "UserPromptSubmit"); len(got) != 1 || got[0] != "/opt/bin/memoria hook user-prompt" {
+	if got := hookCommands(t, s, "UserPromptSubmit"); len(got) != 1 || got[0] != "/opt/bin/memoria hook user-prompt --client claude-code" {
 		t.Fatalf("UserPromptSubmit command = %v", got)
 	}
 }
@@ -65,7 +65,7 @@ func TestInstallHooksCodexLacksNotification(t *testing.T) {
 		t.Fatal("codex must not register Notification")
 	}
 	path := filepath.Join(t.TempDir(), "hooks.json")
-	if err := installHooks(codexEvents, path, "/opt/bin/memoria"); err != nil {
+	if err := installHooks(codexEvents, path, "/opt/bin/memoria", "codex"); err != nil {
 		t.Fatal(err)
 	}
 	s := readSettings(t, path)
@@ -86,7 +86,7 @@ func TestInstallHooksMergePreservesExisting(t *testing.T) {
 	if err := os.WriteFile(path, []byte(existing), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := installHooks(claudeEvents, path, "/opt/bin/memoria"); err != nil {
+	if err := installHooks(claudeEvents, path, "/opt/bin/memoria", "claude-code"); err != nil {
 		t.Fatal(err)
 	}
 	s := readSettings(t, path)
@@ -104,15 +104,34 @@ func TestInstallHooksMergePreservesExisting(t *testing.T) {
 
 func TestInstallHooksIdempotent(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "settings.json")
-	if err := installHooks(claudeEvents, path, "/opt/bin/memoria"); err != nil {
+	if err := installHooks(claudeEvents, path, "/opt/bin/memoria", "claude-code"); err != nil {
 		t.Fatal(err)
 	}
 	first, _ := os.ReadFile(path)
-	if err := installHooks(claudeEvents, path, "/opt/bin/memoria"); err != nil {
+	if err := installHooks(claudeEvents, path, "/opt/bin/memoria", "claude-code"); err != nil {
 		t.Fatal(err)
 	}
 	second, _ := os.ReadFile(path)
 	if string(first) != string(second) {
 		t.Fatal("second install changed file")
+	}
+}
+
+func TestInstallHooksReplacesOldStyleCommand(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	existing := `{
+		"hooks": {
+			"SessionStart": [{"hooks": [{"type": "command", "command": "/old/path/memoria hook session-start"}]}]
+		}
+	}`
+	if err := os.WriteFile(path, []byte(existing), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := installHooks(claudeEvents, path, "/opt/bin/memoria", "claude-code"); err != nil {
+		t.Fatal(err)
+	}
+	cmds := hookCommands(t, readSettings(t, path), "SessionStart")
+	if len(cmds) != 1 || cmds[0] != "/opt/bin/memoria hook session-start --client claude-code" {
+		t.Fatalf("old-style command not replaced: %v", cmds)
 	}
 }

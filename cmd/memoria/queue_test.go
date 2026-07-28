@@ -84,11 +84,11 @@ func TestNewSessionEndsPreviousOnes(t *testing.T) {
 	proj := t.TempDir()
 	cfg := testConfig(t, proj)
 	// s1 starts and never fires session-end (crash, kill, still open)
-	if err := captureHook("user-prompt", promptPayload("s1", proj, "first"), cfg); err != nil {
+	if err := captureHook("user-prompt", nil, promptPayload("s1", proj, "first"), cfg); err != nil {
 		t.Fatal(err)
 	}
 	// s2 starts: s1 must now count as ended
-	if err := captureHook("user-prompt", promptPayload("s2", proj, "second"), cfg); err != nil {
+	if err := captureHook("user-prompt", nil, promptPayload("s2", proj, "second"), cfg); err != nil {
 		t.Fatal(err)
 	}
 	loaded, err := loadQueue(queuePath(cfg))
@@ -141,10 +141,10 @@ func TestCaptureHookRegistersInQueue(t *testing.T) {
 	cfg := testConfig(t, proj)
 	q := queuePath(cfg)
 
-	if err := captureHook("user-prompt", promptPayload("s1", proj, "hi"), cfg); err != nil {
+	if err := captureHook("user-prompt", nil, promptPayload("s1", proj, "hi"), cfg); err != nil {
 		t.Fatal(err)
 	}
-	if err := captureHook("user-prompt", promptPayload("s1", proj, "again"), cfg); err != nil {
+	if err := captureHook("user-prompt", nil, promptPayload("s1", proj, "again"), cfg); err != nil {
 		t.Fatal(err)
 	}
 	b, err := os.ReadFile(q)
@@ -161,7 +161,7 @@ func TestCaptureHookRegistersInQueue(t *testing.T) {
 		t.Fatalf("ended before session-end:\n%s", b)
 	}
 
-	if err := captureHook("session-end", payload("s1", proj), cfg); err != nil {
+	if err := captureHook("session-end", nil, payload("s1", proj), cfg); err != nil {
 		t.Fatal(err)
 	}
 	b, _ = os.ReadFile(q)
@@ -169,7 +169,7 @@ func TestCaptureHookRegistersInQueue(t *testing.T) {
 		t.Fatalf("session-end did not mark entry:\n%s", b)
 	}
 
-	if err := captureHook("user-prompt", promptPayload("s2", proj, "hi"), cfg); err != nil {
+	if err := captureHook("user-prompt", nil, promptPayload("s2", proj, "hi"), cfg); err != nil {
 		t.Fatal(err)
 	}
 	b, _ = os.ReadFile(q)

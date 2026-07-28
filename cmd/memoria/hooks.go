@@ -45,7 +45,7 @@ var codexEvents = func() map[string]string {
 // installHooks merges memoria command hooks into an agent settings file
 // (~/.claude/settings.json or ~/.codex/hooks.json — same JSON shape),
 // preserving every existing key and hook. Idempotent.
-func installHooks(events map[string]string, settingsPath, binPath string) error {
+func installHooks(events map[string]string, settingsPath, binPath, client string) error {
 	raw := map[string]any{}
 	b, err := os.ReadFile(settingsPath)
 	switch {
@@ -63,15 +63,18 @@ func installHooks(events map[string]string, settingsPath, binPath string) error 
 	}
 	for event, name := range events {
 		entries, _ := hooks[event].([]any)
-		// ponytail: idempotency by " hook <name>" suffix — re-running after the
-		// binary moves won't update the old path; re-point by editing settings
-		if hasMemoriaHook(entries, name) {
+		cmd := binPath + " hook " + name + " --client " + client
+		// an existing memoria hook is re-pointed in place: covers moved
+		// binaries and pre---client installs without duplicating entries
+		if hm := findMemoriaHook(entries, name); hm != nil {
+			hm["command"] = cmd
+			hooks[event] = entries
 			continue
 		}
 		entries = append(entries, map[string]any{
 			"hooks": []any{map[string]any{
 				"type":    "command",
-				"command": binPath + " hook " + name,
+				"command": cmd,
 			}},
 		})
 		hooks[event] = entries
@@ -88,16 +91,19 @@ func installHooks(events map[string]string, settingsPath, binPath string) error 
 	return os.WriteFile(settingsPath, append(out, '\n'), 0o644)
 }
 
-func hasMemoriaHook(entries []any, name string) bool {
+// findMemoriaHook returns the hook map whose command runs `hook <name>`,
+// matching both the old bare form and the current --client form.
+func findMemoriaHook(entries []any, name string) map[string]any {
 	for _, e := range entries {
 		em, _ := e.(map[string]any)
 		inner, _ := em["hooks"].([]any)
 		for _, h := range inner {
 			hm, _ := h.(map[string]any)
-			if cmd, _ := hm["command"].(string); strings.HasSuffix(cmd, " hook "+name) {
-				return true
+			cmd, _ := hm["command"].(string)
+			if strings.HasSuffix(cmd, " hook "+name) || strings.Contains(cmd, " hook "+name+" ") {
+				return hm
 			}
 		}
 	}
-	return false
+	return nil
 }

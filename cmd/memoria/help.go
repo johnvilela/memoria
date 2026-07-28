@@ -26,6 +26,7 @@ var commands = []command{
 	{name: "setup", desc: "Reconfigure processor, notifications and schedule (--processor, --notification, --cron [expr|off], --cron-apply)"},
 	{name: "process", desc: "Consolidate pending sessions into the project wiki in the background (review, then --apply; --inspect follows a running job; --all sweeps every project)"},
 	{name: "lint", desc: "Audit the wiki for contradictions in the background (--review, --apply a fix, --deny \"why\")"},
+	{name: "run", desc: "Launch a code agent here, continuing a previous session (--new, --session <id|name>, --last-session)"},
 	{name: "search", desc: "Find wiki pages by text or #tag, pick one to read"},
 	{name: "status", desc: "Show background processing state per project"},
 	{name: "bootstrap", desc: "Register current folder as a tracked project and seed the wiki from git history (--wiki <name>, --background)"},

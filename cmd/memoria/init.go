@@ -236,6 +236,7 @@ func installClientHooks(client string, out io.Writer, usage func()) int {
 	)
 	switch client {
 	case "claude", "claude-code":
+		client = "claude-code"
 		events, label = claudeEvents, "Claude Code"
 		rel = []string{".claude", "settings.json"}
 	case "codex":
@@ -259,7 +260,7 @@ func installClientHooks(client string, out io.Writer, usage func()) int {
 		return 1
 	}
 	settingsPath := filepath.Join(append([]string{home}, rel...)...)
-	if err := installHooks(events, settingsPath, bin); err != nil {
+	if err := installHooks(events, settingsPath, bin, client); err != nil {
 		fmt.Fprintln(out, "error:", err)
 		return 1
 	}

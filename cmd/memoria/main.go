@@ -49,6 +49,13 @@ func run(args []string, stdin io.Reader, out io.Writer) int {
 			return 1
 		}
 		return runLint(cwd, defaultConfigPath(), args[1:], out)
+	case "run":
+		cwd, err := os.Getwd()
+		if err != nil {
+			fmt.Fprintln(out, "error:", err)
+			return 1
+		}
+		return runRun(cwd, defaultConfigPath(), args[1:], out)
 	case "search":
 		cwd, err := os.Getwd()
 		if err != nil {
@@ -61,7 +68,7 @@ func run(args []string, stdin io.Reader, out io.Writer) int {
 	case "hook":
 		// must never block the agent: silent, always 0, nothing on stdout
 		if len(args) > 1 {
-			if err := captureHook(args[1], stdin, defaultConfigPath()); err != nil {
+			if err := captureHook(args[1], args[2:], stdin, defaultConfigPath()); err != nil {
 				logf("hook", "%s: %v", args[1], err)
 			}
 		}

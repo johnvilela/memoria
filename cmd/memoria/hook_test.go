@@ -47,7 +47,7 @@ func TestCaptureHookWritesDigest(t *testing.T) {
 	proj := t.TempDir()
 	cfg := testConfig(t, proj)
 	in := strings.NewReader(fmt.Sprintf(`{"session_id":"abc123","cwd":%q,"prompt":"hello\nworld","permission_mode":"auto"}`, proj))
-	if err := captureHook("user-prompt", in, cfg); err != nil {
+	if err := captureHook("user-prompt", nil, in, cfg); err != nil {
 		t.Fatal(err)
 	}
 	got := readDigest(t, proj, "abc123")
@@ -72,10 +72,10 @@ func TestCaptureHookWritesDigest(t *testing.T) {
 func TestCaptureHookAppendsChronologically(t *testing.T) {
 	proj := t.TempDir()
 	cfg := testConfig(t, proj)
-	if err := captureHook("session-start", payload("s1", proj), cfg); err != nil {
+	if err := captureHook("session-start", nil, payload("s1", proj), cfg); err != nil {
 		t.Fatal(err)
 	}
-	if err := captureHook("user-prompt", promptPayload("s1", proj, "hi"), cfg); err != nil {
+	if err := captureHook("user-prompt", nil, promptPayload("s1", proj, "hi"), cfg); err != nil {
 		t.Fatal(err)
 	}
 	got := readDigest(t, proj, "s1")
@@ -133,7 +133,7 @@ func TestCaptureHookSkipsNoiseHooks(t *testing.T) {
 	for _, hook := range []string{"notification", "subagent-start", "pre-tool-use", "weird-future-event"} {
 		proj := t.TempDir()
 		cfg := testConfig(t, proj)
-		if err := captureHook(hook, payload("s6", proj), cfg); err != nil {
+		if err := captureHook(hook, nil, payload("s6", proj), cfg); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := os.Stat(filepath.Join(proj, ".memoria")); !os.IsNotExist(err) {
@@ -145,11 +145,11 @@ func TestCaptureHookSkipsNoiseHooks(t *testing.T) {
 func TestCaptureHookSessionEnd(t *testing.T) {
 	proj := t.TempDir()
 	cfg := testConfig(t, proj)
-	if err := captureHook("user-prompt", promptPayload("s1", proj, "hi"), cfg); err != nil {
+	if err := captureHook("user-prompt", nil, promptPayload("s1", proj, "hi"), cfg); err != nil {
 		t.Fatal(err)
 	}
 	in := strings.NewReader(fmt.Sprintf(`{"session_id":"s1","cwd":%q,"reason":"exit"}`, proj))
-	if err := captureHook("session-end", in, cfg); err != nil {
+	if err := captureHook("session-end", nil, in, cfg); err != nil {
 		t.Fatal(err)
 	}
 	got := readDigest(t, proj, "s1")
@@ -165,7 +165,7 @@ func TestCaptureHookSessionEnd(t *testing.T) {
 func TestCaptureHookSessionEndFirstEvent(t *testing.T) {
 	proj := t.TempDir()
 	cfg := testConfig(t, proj)
-	if err := captureHook("session-end", payload("s1", proj), cfg); err != nil {
+	if err := captureHook("session-end", nil, payload("s1", proj), cfg); err != nil {
 		t.Fatal(err)
 	}
 	got := readDigest(t, proj, "s1")
@@ -183,7 +183,7 @@ func TestReopenedSessionGetsNewIncarnation(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := captureHook("user-prompt", promptPayload("s1", proj, "round one"), cfg); err != nil {
+	if err := captureHook("user-prompt", nil, promptPayload("s1", proj, "round one"), cfg); err != nil {
 		t.Fatal(err)
 	}
 	// simulate process --apply: digest moves to processed/
@@ -192,7 +192,7 @@ func TestReopenedSessionGetsNewIncarnation(t *testing.T) {
 	}
 
 	// user reopens the session
-	if err := captureHook("user-prompt", promptPayload("s1", proj, "round two"), cfg); err != nil {
+	if err := captureHook("user-prompt", nil, promptPayload("s1", proj, "round two"), cfg); err != nil {
 		t.Fatal(err)
 	}
 	inc2 := filepath.Join(proj, ".memoria", "sessions", "pending", "s1-2.md")
@@ -211,7 +211,7 @@ func TestReopenedSessionGetsNewIncarnation(t *testing.T) {
 	}
 
 	// further events keep appending to the same incarnation
-	if err := captureHook("user-prompt", promptPayload("s1", proj, "still round two"), cfg); err != nil {
+	if err := captureHook("user-prompt", nil, promptPayload("s1", proj, "still round two"), cfg); err != nil {
 		t.Fatal(err)
 	}
 	b, _ = os.ReadFile(inc2)
@@ -229,7 +229,7 @@ func TestReopenedSessionGetsNewIncarnation(t *testing.T) {
 	if err := os.Rename(inc2, filepath.Join(processed, "s1-2.md")); err != nil {
 		t.Fatal(err)
 	}
-	if err := captureHook("user-prompt", promptPayload("s1", proj, "round three"), cfg); err != nil {
+	if err := captureHook("user-prompt", nil, promptPayload("s1", proj, "round three"), cfg); err != nil {
 		t.Fatal(err)
 	}
 	b, err = os.ReadFile(filepath.Join(proj, ".memoria", "sessions", "pending", "s1-3.md"))
@@ -245,7 +245,7 @@ func TestCaptureHookSubdirCwd(t *testing.T) {
 	proj := t.TempDir()
 	sub := filepath.Join(proj, "src", "deep")
 	cfg := testConfig(t, proj)
-	if err := captureHook("user-prompt", promptPayload("s2", sub, "hi"), cfg); err != nil {
+	if err := captureHook("user-prompt", nil, promptPayload("s2", sub, "hi"), cfg); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(digestFile(proj, "s2")); err != nil {
@@ -257,7 +257,7 @@ func TestCaptureHookUntrackedProject(t *testing.T) {
 	proj := t.TempDir()
 	other := t.TempDir()
 	cfg := testConfig(t, proj)
-	if err := captureHook("user-prompt", promptPayload("s3", other, "hi"), cfg); err != nil {
+	if err := captureHook("user-prompt", nil, promptPayload("s3", other, "hi"), cfg); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(other, ".memoria")); !os.IsNotExist(err) {
@@ -267,7 +267,7 @@ func TestCaptureHookUntrackedProject(t *testing.T) {
 
 func TestCaptureHookMissingConfig(t *testing.T) {
 	proj := t.TempDir()
-	if err := captureHook("stop", payload("s5", proj), filepath.Join(t.TempDir(), "nope.yaml")); err != nil {
+	if err := captureHook("stop", nil, payload("s5", proj), filepath.Join(t.TempDir(), "nope.yaml")); err != nil {
 		t.Fatalf("missing config must be silent, got %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(proj, ".memoria")); !os.IsNotExist(err) {
@@ -279,7 +279,7 @@ func TestCaptureHookRejectsBadSessionID(t *testing.T) {
 	proj := t.TempDir()
 	cfg := testConfig(t, proj)
 	for _, sid := range []string{"../evil", "a/b", ".", ".."} {
-		if err := captureHook("user-prompt", promptPayload(sid, proj, "hi"), cfg); err != nil {
+		if err := captureHook("user-prompt", nil, promptPayload(sid, proj, "hi"), cfg); err != nil {
 			t.Fatalf("sid %q: want silent skip, got %v", sid, err)
 		}
 	}
@@ -300,7 +300,7 @@ func indexFile(proj string) string {
 func TestIndexSessionFirstPrompt(t *testing.T) {
 	proj := t.TempDir()
 	cfg := testConfig(t, proj)
-	if err := captureHook("user-prompt", promptPayload("s1", proj, "hello world"), cfg); err != nil {
+	if err := captureHook("user-prompt", nil, promptPayload("s1", proj, "hello world"), cfg); err != nil {
 		t.Fatal(err)
 	}
 	b, err := os.ReadFile(indexFile(proj))
@@ -316,18 +316,18 @@ func TestIndexSessionFirstPrompt(t *testing.T) {
 func TestIndexSessionOncePerID(t *testing.T) {
 	proj := t.TempDir()
 	cfg := testConfig(t, proj)
-	if err := captureHook("user-prompt", promptPayload("s1", proj, "first"), cfg); err != nil {
+	if err := captureHook("user-prompt", nil, promptPayload("s1", proj, "first"), cfg); err != nil {
 		t.Fatal(err)
 	}
 	before, _ := os.ReadFile(indexFile(proj))
-	if err := captureHook("user-prompt", promptPayload("s1", proj, "second"), cfg); err != nil {
+	if err := captureHook("user-prompt", nil, promptPayload("s1", proj, "second"), cfg); err != nil {
 		t.Fatal(err)
 	}
 	after, _ := os.ReadFile(indexFile(proj))
 	if string(before) != string(after) {
 		t.Fatalf("index changed on repeat prompt: %q -> %q", before, after)
 	}
-	if err := captureHook("user-prompt", promptPayload("s2", proj, "other session"), cfg); err != nil {
+	if err := captureHook("user-prompt", nil, promptPayload("s2", proj, "other session"), cfg); err != nil {
 		t.Fatal(err)
 	}
 	b, _ := os.ReadFile(indexFile(proj))
@@ -341,7 +341,7 @@ func TestIndexSessionSanitizesName(t *testing.T) {
 	proj := t.TempDir()
 	cfg := testConfig(t, proj)
 	long := "line one\nline two\t" + strings.Repeat("x", 100)
-	if err := captureHook("user-prompt", promptPayload("s1", proj, long), cfg); err != nil {
+	if err := captureHook("user-prompt", nil, promptPayload("s1", proj, long), cfg); err != nil {
 		t.Fatal(err)
 	}
 	b, _ := os.ReadFile(indexFile(proj))
@@ -365,7 +365,7 @@ func TestCaptureHookNoCaptureEnv(t *testing.T) {
 	t.Setenv("MEMORIA_NO_CAPTURE", "1")
 	proj := t.TempDir()
 	cfg := testConfig(t, proj)
-	if err := captureHook("user-prompt", promptPayload("s1", proj, "hi"), cfg); err != nil {
+	if err := captureHook("user-prompt", nil, promptPayload("s1", proj, "hi"), cfg); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(proj, ".memoria")); !os.IsNotExist(err) {
@@ -394,5 +394,27 @@ func TestMatchProject(t *testing.T) {
 		if got := matchProject(tc.cwd, projects); got != tc.want {
 			t.Errorf("matchProject(%q, %v) = %q, want %q", tc.cwd, tc.paths, got, tc.want)
 		}
+	}
+}
+
+func TestCaptureHookClientFrontmatter(t *testing.T) {
+	proj := t.TempDir()
+	cfg := testConfig(t, proj)
+	if err := captureHook("user-prompt", []string{"--client", "claude-code"}, promptPayload("s1", proj, "hi"), cfg); err != nil {
+		t.Fatal(err)
+	}
+	if got := readDigest(t, proj, "s1"); !strings.Contains(got, "\nclient: claude-code\n") {
+		t.Fatalf("frontmatter missing client: %q", got)
+	}
+}
+
+func TestCaptureHookNoClientNoLine(t *testing.T) {
+	proj := t.TempDir()
+	cfg := testConfig(t, proj)
+	if err := captureHook("user-prompt", nil, promptPayload("s1", proj, "hi"), cfg); err != nil {
+		t.Fatal(err)
+	}
+	if got := readDigest(t, proj, "s1"); strings.Contains(got, "client:") {
+		t.Fatalf("client line written without --client: %q", got)
 	}
 }

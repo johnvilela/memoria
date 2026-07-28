@@ -143,7 +143,11 @@ func indexSession(proj, sid, prompt string) error {
 // captureHook appends the event as an "@hook ..." line to the session digest
 // at <project>/.memoria/sessions/pending/<session_id>.md for tracked
 // projects. Untracked project, missing config, or bad payload → silent no-op.
-func captureHook(name string, stdin io.Reader, configPath string) error {
+func captureHook(name string, hookArgs []string, stdin io.Reader, configPath string) error {
+	client := ""
+	if len(hookArgs) >= 2 && hookArgs[0] == "--client" {
+		client = hookArgs[1]
+	}
 	// set by tooling (tests, nested agents) so their sessions aren't captured
 	if os.Getenv("MEMORIA_NO_CAPTURE") != "" {
 		return nil
@@ -175,7 +179,7 @@ func captureHook(name string, stdin io.Reader, configPath string) error {
 			return err
 		}
 	}
-	return appendDigest(proj, projName, sid, name, payload, queuePath(configPath))
+	return appendDigest(proj, projName, sid, name, client, payload, queuePath(configPath))
 }
 
 // incarnationName returns the digest file name of the nth incarnation of a
@@ -229,7 +233,7 @@ func resolveDigestPath(proj, sid string) (path, continuesFrom string) {
 // appendDigest ensures the digest file exists (frontmatter written on first
 // event, whichever hook that is), appends the rendered event line, and keeps
 // the central pending queue in sync.
-func appendDigest(proj, projName, sid, name string, payload map[string]any, queueFile string) error {
+func appendDigest(proj, projName, sid, name, client string, payload map[string]any, queueFile string) error {
 	line := renderEvent(name, payload)
 	if line == "" {
 		return nil
@@ -247,16 +251,20 @@ func appendDigest(proj, projName, sid, name string, payload map[string]any, queu
 		if continuesFrom != "" {
 			link = "continues_from: " + continuesFrom + "\n"
 		}
+		clientLine := ""
+		if client != "" {
+			clientLine = "client: " + client + "\n"
+		}
 		fmt.Fprintf(f, `---
 schema_version: 2
 kind: session-digest
 session_id: %s
 project: %s
 project_root: %s
-started_at: %s
+%sstarted_at: %s
 %s---
 
-`, sid, projName, proj, now, link)
+`, sid, projName, proj, clientLine, now, link)
 		f.Close()
 	} else if !os.IsExist(err) {
 		return err
