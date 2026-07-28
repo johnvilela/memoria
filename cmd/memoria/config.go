@@ -15,9 +15,10 @@ type project struct {
 }
 
 type config struct {
-	Projects     []project `yaml:"projects"`
-	Processor    string    `yaml:"processor,omitempty"`      // AI provider that processes sessions into wiki/memories
-	GeminiAPIKey string    `yaml:"gemini_api_key,omitempty"` // only when processor is gemini
+	Projects      []project `yaml:"projects"`
+	Processor     string    `yaml:"processor,omitempty"`      // AI provider that processes sessions into wiki/memories
+	GeminiAPIKey  string    `yaml:"gemini_api_key,omitempty"` // only when processor is gemini
+	Notifications bool      `yaml:"notifications,omitempty"`  // desktop notification when background processing finishes
 }
 
 func loadConfig(path string) (config, error) {

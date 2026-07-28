@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,9 +11,15 @@ import (
 // TestMain disables logging so unrelated tests never touch the real
 // ~/.config/memoria/memoria.log; log tests redirect logPath themselves.
 // isTTY is forced false so init tests never open the interactive TUI.
+// spawnDetached errors so no test ever re-execs the test binary; detach
+// tests stub it explicitly.
 func TestMain(m *testing.M) {
 	logPath = ""
 	isTTY = func() bool { return false }
+	spawnDetached = func(dir string, args ...string) (int, error) {
+		return 0, fmt.Errorf("spawnDetached not stubbed")
+	}
+	notifyCmd = func(title, body string) error { return nil } // never shell out to notify-send
 	os.Exit(m.Run())
 }
 

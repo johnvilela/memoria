@@ -63,7 +63,7 @@ func TestProcessWritesProposal(t *testing.T) {
 	proj, cfgPath, digest := processFixture(t)
 	prompt := stubProcessor(t, "```json\n"+goodProposalPages+"\n```", nil)
 	var buf bytes.Buffer
-	if code := runProcess(proj, cfgPath, nil, &buf); code != 0 {
+	if code := runProcess(proj, cfgPath, []string{"--foreground"}, &buf); code != 0 {
 		t.Fatalf("process = %d: %s", code, buf.String())
 	}
 	b, err := os.ReadFile(filepath.Join(proj, ".memoria", "proposal.json"))
@@ -112,7 +112,7 @@ func TestProcessSkipsUnendedSessions(t *testing.T) {
 	}
 	prompt := stubProcessor(t, goodProposalPages, nil)
 	var buf bytes.Buffer
-	if code := runProcess(proj, cfgPath, nil, &buf); code != 0 {
+	if code := runProcess(proj, cfgPath, []string{"--foreground"}, &buf); code != 0 {
 		t.Fatalf("process = %d: %s", code, buf.String())
 	}
 	if strings.Contains(*prompt, "unfinished work") {
@@ -141,7 +141,7 @@ func TestProcessRejectsBadPages(t *testing.T) {
 		proj, cfgPath, _ := processFixture(t)
 		stubProcessor(t, bad, nil)
 		var buf bytes.Buffer
-		if code := runProcess(proj, cfgPath, nil, &buf); code != 1 {
+		if code := runProcess(proj, cfgPath, []string{"--foreground"}, &buf); code != 1 {
 			t.Fatalf("bad proposal %q accepted: %d %s", bad, code, buf.String())
 		}
 		if _, err := os.Stat(filepath.Join(proj, ".memoria", "proposal.json")); !os.IsNotExist(err) {
@@ -154,7 +154,7 @@ func TestProcessApply(t *testing.T) {
 	proj, cfgPath, digest := processFixture(t)
 	stubProcessor(t, goodProposalPages, nil)
 	var buf bytes.Buffer
-	if code := runProcess(proj, cfgPath, nil, &buf); code != 0 {
+	if code := runProcess(proj, cfgPath, []string{"--foreground"}, &buf); code != 0 {
 		t.Fatalf("process = %d: %s", code, buf.String())
 	}
 	buf.Reset()
@@ -214,7 +214,7 @@ func TestWikiPromptMaterializedAndEditable(t *testing.T) {
 	proj, cfgPath, _ := processFixture(t)
 	stubProcessor(t, goodProposalPages, nil)
 	var buf bytes.Buffer
-	if code := runProcess(proj, cfgPath, nil, &buf); code != 0 {
+	if code := runProcess(proj, cfgPath, []string{"--foreground"}, &buf); code != 0 {
 		t.Fatalf("process = %d: %s", code, buf.String())
 	}
 	pp := filepath.Join(filepath.Dir(cfgPath), "wiki-prompt.md")
@@ -225,7 +225,7 @@ func TestWikiPromptMaterializedAndEditable(t *testing.T) {
 		t.Fatal(err)
 	}
 	prompt := stubProcessor(t, goodProposalPages, nil)
-	if code := runProcess(proj, cfgPath, nil, &buf); code != 0 {
+	if code := runProcess(proj, cfgPath, []string{"--foreground"}, &buf); code != 0 {
 		t.Fatalf("second process = %d: %s", code, buf.String())
 	}
 	if !strings.Contains(*prompt, "CUSTOM RULES ONLY") || strings.Contains(*prompt, "FAITHFULNESS") {
@@ -247,6 +247,152 @@ func TestExtractJSON(t *testing.T) {
 	}
 	if _, err := extractJSON("no braces here"); err == nil {
 		t.Fatal("want error for missing JSON")
+	}
+}
+
+// stubSpawn replaces spawnDetached, recording the call
+func stubSpawn(t *testing.T, pid int) *[]string {
+	t.Helper()
+	var got []string
+	orig := spawnDetached
+	spawnDetached = func(dir string, args ...string) (int, error) {
+		got = append([]string{dir}, args...)
+		return pid, nil
+	}
+	t.Cleanup(func() { spawnDetached = orig })
+	return &got
+}
+
+func TestProcessDetachesByDefault(t *testing.T) {
+	proj, cfgPath, _ := processFixture(t)
+	stubProcessor(t, "", fmt.Errorf("parent must not invoke the processor"))
+	spawned := stubSpawn(t, 4242)
+	var buf bytes.Buffer
+	if code := runProcess(proj, cfgPath, nil, &buf); code != 0 {
+		t.Fatalf("process = %d: %s", code, buf.String())
+	}
+	want := []string{proj, "process", "--foreground"}
+	if len(*spawned) != 3 || (*spawned)[0] != want[0] || (*spawned)[1] != want[1] || (*spawned)[2] != want[2] {
+		t.Fatalf("spawn args = %v, want %v", *spawned, want)
+	}
+	if !strings.Contains(buf.String(), "4242") || !strings.Contains(buf.String(), "background") {
+		t.Fatalf("detach message missing: %s", buf.String())
+	}
+	st, _ := loadStatus(statusPath(cfgPath))
+	e := st[filepath.Base(proj)]
+	if e.State != "running" || e.PID != 4242 {
+		t.Fatalf("status not running: %+v", e)
+	}
+}
+
+func TestProcessRefusesConcurrentRun(t *testing.T) {
+	proj, cfgPath, _ := processFixture(t)
+	if err := statusSet(statusPath(cfgPath), filepath.Base(proj), "running", os.Getpid(), ""); err != nil {
+		t.Fatal(err)
+	}
+	spawned := stubSpawn(t, 4242)
+	var buf bytes.Buffer
+	if code := runProcess(proj, cfgPath, nil, &buf); code != 1 {
+		t.Fatalf("concurrent run allowed: %d %s", code, buf.String())
+	}
+	if len(*spawned) != 0 {
+		t.Fatalf("spawned despite running: %v", *spawned)
+	}
+	if !strings.Contains(buf.String(), "already running") {
+		t.Fatalf("message missing: %s", buf.String())
+	}
+}
+
+func TestProcessStaleRunningRespawns(t *testing.T) {
+	proj, cfgPath, _ := processFixture(t)
+	if err := statusSet(statusPath(cfgPath), filepath.Base(proj), "running", 999999999, ""); err != nil {
+		t.Fatal(err)
+	}
+	spawned := stubSpawn(t, 4242)
+	var buf bytes.Buffer
+	if code := runProcess(proj, cfgPath, nil, &buf); code != 0 {
+		t.Fatalf("stale running blocked respawn: %d %s", code, buf.String())
+	}
+	if len(*spawned) == 0 {
+		t.Fatal("not respawned over dead pid")
+	}
+}
+
+func TestForegroundWritesStatus(t *testing.T) {
+	proj, cfgPath, _ := processFixture(t)
+	stubProcessor(t, goodProposalPages, nil)
+	var buf bytes.Buffer
+	if code := runProcess(proj, cfgPath, []string{"--foreground"}, &buf); code != 0 {
+		t.Fatalf("process = %d: %s", code, buf.String())
+	}
+	st, _ := loadStatus(statusPath(cfgPath))
+	e := st[filepath.Base(proj)]
+	if e.State != "done" || !strings.Contains(e.Detail, "2 page") {
+		t.Fatalf("done status wrong: %+v", e)
+	}
+
+	proj2, cfgPath2, _ := processFixture(t)
+	stubProcessor(t, "", fmt.Errorf("claude exploded"))
+	buf.Reset()
+	if code := runProcess(proj2, cfgPath2, []string{"--foreground"}, &buf); code != 1 {
+		t.Fatalf("processor error swallowed: %d %s", code, buf.String())
+	}
+	st, _ = loadStatus(statusPath(cfgPath2))
+	e = st[filepath.Base(proj2)]
+	if e.State != "error" || !strings.Contains(e.Detail, "claude exploded") {
+		t.Fatalf("error status wrong: %+v", e)
+	}
+}
+
+// enableNotifications flips the flag in an existing test config
+func enableNotifications(t *testing.T, cfgPath string) {
+	t.Helper()
+	cfg, err := loadConfig(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Notifications = true
+	if err := saveConfig(cfgPath, cfg); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestProcessNotifiesOnDoneAndError(t *testing.T) {
+	proj, cfgPath, _ := processFixture(t)
+	enableNotifications(t, cfgPath)
+	stubProcessor(t, goodProposalPages, nil)
+	got := stubNotify(t)
+	var buf bytes.Buffer
+	if code := runProcess(proj, cfgPath, []string{"--foreground"}, &buf); code != 0 {
+		t.Fatalf("process = %d: %s", code, buf.String())
+	}
+	if len(*got) != 1 || !strings.Contains((*got)[0][1], "Proposal ready") {
+		t.Fatalf("success notification wrong: %v", *got)
+	}
+
+	proj2, cfgPath2, _ := processFixture(t)
+	enableNotifications(t, cfgPath2)
+	stubProcessor(t, "", fmt.Errorf("claude exploded"))
+	got = stubNotify(t)
+	buf.Reset()
+	if code := runProcess(proj2, cfgPath2, []string{"--foreground"}, &buf); code != 1 {
+		t.Fatalf("process = %d: %s", code, buf.String())
+	}
+	if len(*got) != 1 || !strings.Contains((*got)[0][1], "failed") {
+		t.Fatalf("error notification wrong: %v", *got)
+	}
+}
+
+func TestProcessNoNotificationWhenDisabled(t *testing.T) {
+	proj, cfgPath, _ := processFixture(t)
+	stubProcessor(t, goodProposalPages, nil)
+	got := stubNotify(t)
+	var buf bytes.Buffer
+	if code := runProcess(proj, cfgPath, []string{"--foreground"}, &buf); code != 0 {
+		t.Fatalf("process = %d: %s", code, buf.String())
+	}
+	if len(*got) != 0 {
+		t.Fatalf("notified despite disabled config: %v", *got)
 	}
 }
 

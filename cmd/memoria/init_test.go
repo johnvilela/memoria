@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -153,6 +154,168 @@ func TestInitGeminiNoKeyNonTTY(t *testing.T) {
 	code, out := runInitCmd(t, "claude-code", "--processor", "gemini")
 	if code != 1 || !strings.Contains(out, "GEMINI_API_KEY") {
 		t.Fatalf("gemini without key: code=%d out=%q, want error naming GEMINI_API_KEY", code, out)
+	}
+}
+
+func TestInitNotificationFlag(t *testing.T) {
+	_, cfgPath := initEnv(t)
+	// no --processor: the notification flag must still be honored
+	code, out := runInitCmd(t, "claude-code", "--notification")
+	if code != 0 {
+		t.Fatalf("init = %d: %s", code, out)
+	}
+	if !strings.Contains(out, "Notifications enabled") {
+		t.Fatalf("confirmation missing: %q", out)
+	}
+	cfg, err := loadConfig(cfgPath)
+	if err != nil || !cfg.Notifications {
+		t.Fatalf("notifications not saved: %v %+v", err, cfg)
+	}
+}
+
+func TestInitNotificationFalseFlag(t *testing.T) {
+	_, cfgPath := initEnv(t)
+	if err := saveConfig(cfgPath, config{Notifications: true}); err != nil {
+		t.Fatal(err)
+	}
+	code, out := runInitCmd(t, "claude-code", "--processor", "ollama", "--notification=false")
+	if code != 0 {
+		t.Fatalf("init = %d: %s", code, out)
+	}
+	cfg, _ := loadConfig(cfgPath)
+	if cfg.Notifications {
+		t.Fatal("--notification=false did not disable")
+	}
+	if cfg.Processor != "ollama" {
+		t.Fatalf("processor lost: %+v", cfg)
+	}
+}
+
+func TestInitNotificationOmittedPreservesConfig(t *testing.T) {
+	_, cfgPath := initEnv(t)
+	if err := saveConfig(cfgPath, config{Notifications: true}); err != nil {
+		t.Fatal(err)
+	}
+	code, out := runInitCmd(t, "claude-code") // non-TTY, no flags
+	if code != 0 {
+		t.Fatalf("init = %d: %s", code, out)
+	}
+	cfg, _ := loadConfig(cfgPath)
+	if !cfg.Notifications {
+		t.Fatal("omitted flag reset notifications")
+	}
+}
+
+func TestInitNotificationWarnsWhenNotifySendMissing(t *testing.T) {
+	initEnv(t)
+	t.Setenv("PATH", t.TempDir()) // empty dir: no notify-send
+	code, out := runInitCmd(t, "claude-code", "--notification")
+	if code != 0 {
+		t.Fatalf("init = %d: %s", code, out)
+	}
+	if !strings.Contains(out, "warning") || !strings.Contains(out, "notify-send") {
+		t.Fatalf("missing notify-send warning: %q", out)
+	}
+}
+
+// gitDir creates a temp git repo; withCommit adds one commit touching main.go.
+func gitDir(t *testing.T, withCommit bool) string {
+	t.Helper()
+	dir := t.TempDir()
+	git := func(args ...string) {
+		cmd := exec.Command("git", append([]string{"-C", dir, "-c", "user.email=t@t", "-c", "user.name=t"}, args...)...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v %s", args, err, out)
+		}
+	}
+	git("init", "-q")
+	if withCommit {
+		if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		git("add", ".")
+		git("commit", "-q", "-m", "feat: add rocket engine")
+	}
+	return dir
+}
+
+func TestHasCommits(t *testing.T) {
+	if hasCommits(t.TempDir()) {
+		t.Fatal("no repo reported commits")
+	}
+	if hasCommits(gitDir(t, false)) {
+		t.Fatal("empty repo reported commits")
+	}
+	if !hasCommits(gitDir(t, true)) {
+		t.Fatal("repo with commit reported none")
+	}
+}
+
+func TestSeedWiki(t *testing.T) {
+	_, cfgPath := initEnv(t)
+	dir := gitDir(t, true)
+	wikiRoot := filepath.Join(dir, "wiki")
+
+	var gotPrompt string
+	orig := invokeProcessor
+	invokeProcessor = func(cfg config, prompt string) (string, error) {
+		gotPrompt = prompt
+		return `{"pages":[{"action":"create","path":"index.md","title":"Home","content":"# Home\n"},{"action":"create","path":"concepts/engine.md","title":"Engine","content":"# Engine\n"}]}`, nil
+	}
+	defer func() { invokeProcessor = orig }()
+
+	var buf bytes.Buffer
+	if err := seedWiki(config{Processor: "claude-code"}, dir, wikiRoot, cfgPath, &buf); err != nil {
+		t.Fatalf("seedWiki: %v", err)
+	}
+	for _, p := range []string{"index.md", "concepts/engine.md"} {
+		if _, err := os.Stat(filepath.Join(wikiRoot, p)); err != nil {
+			t.Fatalf("page %s not written: %v", p, err)
+		}
+	}
+	for _, want := range []string{"rocket engine", "main.go", "OUTPUT FORMAT"} {
+		if !strings.Contains(gotPrompt, want) {
+			t.Fatalf("prompt missing %q", want)
+		}
+	}
+	if !strings.Contains(buf.String(), "index.md") {
+		t.Fatalf("output should list written pages: %q", buf.String())
+	}
+}
+
+func TestSeedWikiRejectsInvalidPages(t *testing.T) {
+	_, cfgPath := initEnv(t)
+	dir := gitDir(t, true)
+	wikiRoot := filepath.Join(dir, "wiki")
+
+	orig := invokeProcessor
+	invokeProcessor = func(cfg config, prompt string) (string, error) {
+		return `{"pages":[{"action":"create","path":"../evil.md","title":"x","content":"y"}]}`, nil
+	}
+	defer func() { invokeProcessor = orig }()
+
+	var buf bytes.Buffer
+	if err := seedWiki(config{Processor: "claude-code"}, dir, wikiRoot, cfgPath, &buf); err == nil {
+		t.Fatal("invalid page path accepted")
+	}
+	if _, err := os.Stat(wikiRoot); !os.IsNotExist(err) {
+		t.Fatalf("wiki written despite invalid proposal: %v", err)
+	}
+}
+
+func TestInitNonTTYNeverSeeds(t *testing.T) {
+	initEnv(t)
+	dir := gitDir(t, true)
+	t.Chdir(dir)
+	orig := invokeProcessor
+	invokeProcessor = func(cfg config, prompt string) (string, error) {
+		t.Fatal("non-TTY init must not invoke the processor")
+		return "", nil
+	}
+	defer func() { invokeProcessor = orig }()
+	code, out := runInitCmd(t, "claude-code", "--processor", "ollama")
+	if code != 0 {
+		t.Fatalf("init = %d: %s", code, out)
 	}
 }
 

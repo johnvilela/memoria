@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -113,6 +114,30 @@ func (m secretModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m secretModel) View() string {
 	return m.input.View() + tuiFaint.Render("\nenter confirm · esc cancel") + "\n"
+}
+
+// withSpinner runs fn while animating a spinner on stderr, clearing the line
+// when fn returns. ponytail: plain goroutine, no bubbletea program needed.
+func withSpinner(msg string, fn func() error) error {
+	done := make(chan struct{})
+	cleared := make(chan struct{})
+	go func() {
+		defer close(cleared)
+		frames := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+		for i := 0; ; i++ {
+			select {
+			case <-done:
+				fmt.Fprint(os.Stderr, "\r\033[K")
+				return
+			case <-time.After(100 * time.Millisecond):
+				fmt.Fprintf(os.Stderr, "\r%s %s", tuiCursor.Render(frames[i%len(frames)]), msg)
+			}
+		}
+	}()
+	err := fn()
+	close(done)
+	<-cleared
+	return err
 }
 
 // promptSecret asks for a masked value (API keys).

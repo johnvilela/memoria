@@ -9,10 +9,12 @@ import (
 	"io/fs"
 	"maps"
 	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -40,13 +42,33 @@ type proposal struct {
 	Pages       []wikiPage `json:"pages"`
 }
 
+// spawnDetached re-execs the CLI in its own session with no stdio so long
+// processor runs never block the user's terminal or agent.
+var spawnDetached = func(dir string, args ...string) (int, error) {
+	exe, err := os.Executable()
+	if err != nil {
+		return 0, err
+	}
+	cmd := exec.Command(exe, args...)
+	cmd.Dir = dir
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if err := cmd.Start(); err != nil {
+		return 0, err
+	}
+	pid := cmd.Process.Pid
+	_ = cmd.Process.Release()
+	return pid, nil
+}
+
 // runProcess consolidates a project's ended pending sessions into a wiki
-// proposal (default) or applies a reviewed proposal (--apply). The LLM never
-// writes files: it returns JSON, Go validates and writes.
+// proposal (detached by default; --foreground runs inline) or applies a
+// reviewed proposal (--apply). The LLM never writes files: it returns JSON,
+// Go validates and writes.
 func runProcess(cwd, configPath string, args []string, out io.Writer) int {
 	fs := flag.NewFlagSet("process", flag.ContinueOnError)
 	fs.SetOutput(out)
 	apply := fs.Bool("apply", false, "write the reviewed proposal to the wiki")
+	foreground := fs.Bool("foreground", false, "run the processor in this terminal instead of detaching")
 	if err := fs.Parse(args); err != nil {
 		return 1
 	}
@@ -71,17 +93,52 @@ func runProcess(cwd, configPath string, args []string, out io.Writer) int {
 	if *apply {
 		return applyProposal(proj, wikiRoot, proposalPath, queuePath(configPath), p.Name, out)
 	}
+	if !*foreground {
+		return detachProcess(cwd, configPath, p.Name, out)
+	}
 	return generateProposal(cfg, proj, wikiRoot, proposalPath, configPath, p.Name, out)
 }
 
-func generateProposal(cfg config, proj, wikiRoot, proposalPath, configPath, projName string, out io.Writer) int {
-	queue, err := loadQueue(queuePath(configPath))
+// detachProcess hands the slow part (invoking the LLM) to a detached child
+// running `process --foreground`, so the terminal and any active agent stay
+// free. Progress is tracked in status.yaml (see memoria status).
+func detachProcess(cwd, configPath, projName string, out io.Writer) int {
+	sessions, _, err := collectEnded(queuePath(configPath), projName)
 	if err != nil {
 		fmt.Fprintln(out, "error:", err)
 		return 1
 	}
-	var sessions []string
-	digests := map[string]string{}
+	if len(sessions) == 0 {
+		fmt.Fprintln(out, "Nothing to process — no ended pending sessions for", projName)
+		return 0
+	}
+	sPath := statusPath(configPath)
+	if st, _ := loadStatus(sPath); st[projName].State == "running" && pidAlive(st[projName].PID) {
+		fmt.Fprintf(out, "error: processing already running for %s (pid %d)\n", projName, st[projName].PID)
+		return 1
+	}
+	pid, err := spawnDetached(cwd, "process", "--foreground")
+	if err != nil {
+		fmt.Fprintln(out, "error:", err)
+		return 1
+	}
+	if err := statusSet(sPath, projName, "running", pid, ""); err != nil {
+		logf("process", "%s: status: %v", projName, err)
+	}
+	logf("process", "%s: detached pid %d for %d sessions", projName, pid, len(sessions))
+	fmt.Fprintf(out, "Processing %d session(s) in background (pid %d).\n", len(sessions), pid)
+	fmt.Fprintln(out, "Follow with: memoria status — the proposal lands at .memoria/proposal.json")
+	return 0
+}
+
+// collectEnded returns the project's ended queue entries whose digest file
+// still exists, plus their contents.
+func collectEnded(qPath, projName string) (sessions []string, digests map[string]string, err error) {
+	queue, err := loadQueue(qPath)
+	if err != nil {
+		return nil, nil, err
+	}
+	digests = map[string]string{}
 	for _, e := range queue[projName] {
 		if !e.Ended {
 			continue
@@ -93,38 +150,58 @@ func generateProposal(cfg config, proj, wikiRoot, proposalPath, configPath, proj
 		sessions = append(sessions, e.Path)
 		digests[e.Path] = string(b)
 	}
+	return sessions, digests, nil
+}
+
+func generateProposal(cfg config, proj, wikiRoot, proposalPath, configPath, projName string, out io.Writer) int {
+	// runs detached most of the time — status.yaml is how the outcome
+	// reaches the user (memoria status)
+	fail := func(err error) int {
+		fmt.Fprintln(out, "error:", err)
+		logf("process", "%s: %v", projName, err)
+		if serr := statusSet(statusPath(configPath), projName, "error", 0, collapse(err.Error(), 300)); serr != nil {
+			logf("process", "%s: status: %v", projName, serr)
+		}
+		notify(cfg, "memoria", projName+": processing failed — see memoria status")
+		return 1
+	}
+	done := func(detail string) {
+		if serr := statusSet(statusPath(configPath), projName, "done", 0, detail); serr != nil {
+			logf("process", "%s: status: %v", projName, serr)
+		}
+	}
+
+	sessions, digests, err := collectEnded(queuePath(configPath), projName)
+	if err != nil {
+		return fail(err)
+	}
 	if len(sessions) == 0 {
 		fmt.Fprintln(out, "Nothing to process — no ended pending sessions for", projName)
+		done("nothing to process")
 		return 0
 	}
 
 	rules, err := loadWikiPrompt(configPath)
 	if err != nil {
-		fmt.Fprintln(out, "error:", err)
-		return 1
+		return fail(err)
 	}
 	prompt := buildPrompt(rules, readWiki(wikiRoot), digests)
 	raw, err := invokeProcessor(cfg, prompt)
 	if err != nil {
-		fmt.Fprintln(out, "error:", err)
-		logf("process", "%s: processor: %v", projName, err)
-		return 1
+		return fail(err)
 	}
 	jsonStr, err := extractJSON(raw)
 	if err != nil {
-		fmt.Fprintln(out, "error:", err)
-		return 1
+		return fail(err)
 	}
 	var pp struct {
 		Pages []wikiPage `json:"pages"`
 	}
 	if err := json.Unmarshal([]byte(jsonStr), &pp); err != nil {
-		fmt.Fprintln(out, "error: processor returned invalid JSON:", err)
-		return 1
+		return fail(fmt.Errorf("processor returned invalid JSON: %w", err))
 	}
 	if err := validatePages(pp.Pages); err != nil {
-		fmt.Fprintln(out, "error:", err)
-		return 1
+		return fail(err)
 	}
 
 	prop := proposal{
@@ -135,18 +212,18 @@ func generateProposal(cfg config, proj, wikiRoot, proposalPath, configPath, proj
 	}
 	b, err := json.MarshalIndent(prop, "", "  ")
 	if err != nil {
-		fmt.Fprintln(out, "error:", err)
-		return 1
+		return fail(err)
 	}
 	if err := os.WriteFile(proposalPath, append(b, '\n'), 0o644); err != nil {
-		fmt.Fprintln(out, "error:", err)
-		return 1
+		return fail(err)
 	}
 	fmt.Fprintf(out, "Proposal from %d session(s):\n", len(sessions))
 	for _, pg := range prop.Pages {
 		fmt.Fprintf(out, "  %-6s %s — %s\n", pg.Action, pg.Path, pg.Title)
 	}
 	fmt.Fprintf(out, "Review %s then run: memoria process --apply\n", proposalPath)
+	done(fmt.Sprintf("proposal ready: %d pages from %d sessions — review and run memoria process --apply", len(prop.Pages), len(sessions)))
+	notify(cfg, "memoria", "Proposal ready for "+projName+" — review and run memoria process --apply")
 	logf("process", "%s: proposal with %d pages from %d sessions", projName, len(prop.Pages), len(sessions))
 	return 0
 }
@@ -242,16 +319,20 @@ func validPagePath(p string) bool {
 // loadWikiPrompt returns the user-editable prompt, materializing the embedded
 // default next to the config on first use.
 func loadWikiPrompt(configPath string) (string, error) {
-	p := filepath.Join(filepath.Dir(configPath), "wiki-prompt.md")
+	return loadPromptFile(configPath, "wiki-prompt.md", defaultWikiPrompt)
+}
+
+func loadPromptFile(configPath, name, def string) (string, error) {
+	p := filepath.Join(filepath.Dir(configPath), name)
 	b, err := os.ReadFile(p)
 	if os.IsNotExist(err) {
 		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 			return "", err
 		}
-		if err := os.WriteFile(p, []byte(defaultWikiPrompt), 0o644); err != nil {
+		if err := os.WriteFile(p, []byte(def), 0o644); err != nil {
 			return "", err
 		}
-		return defaultWikiPrompt, nil
+		return def, nil
 	}
 	if err != nil {
 		return "", err
