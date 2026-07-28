@@ -53,5 +53,6 @@ Differentiator vs. existing solutions: hooks + cronjobs + markdown files, human-
        path: /home/me/dev/some-project
    ```
    `cwd` is matched by longest path prefix; untracked projects are silently ignored.
-4. Captured lines append chronologically to `<project>/.memoria/sessions/<session_id>.md` as `DATETIME - HOOK_NAME - DATA` (RFC3339 local time, full compact JSON payload).
-5. `memoria hook` must NEVER block an agent: always exits 0, never writes stdout (some agents inject hook stdout as model context).
+4. Captured lines append chronologically to `<project>/.memoria/sessions/<session_id>.md` as `DATETIME - HOOK_NAME - DATA` (RFC3339 local time). DATA is a per-hook whitelist (`hookFields` in `hook.go`), not the full payload: `user-prompt`→prompt, `post-tool-use`→tool_name+input+response, `pre-tool-use`→tool_name, `stop`/`subagent-stop`→last_assistant_message, `session-start`→source, `session-end`→reason, `other`→payload minus noise keys. `pre/post-compact` write a timestamp-only marker; `notification` and `subagent-start` write nothing. Empty values (`""`, `false`, `[]`, `{}`) are dropped.
+5. `<project>/.memoria/sessions.md` indexes sessions as `DATETIME - SESSION_ID - NAME` — the name is the session's first user prompt (whitespace-collapsed, truncated to 80 runes). One entry per session id.
+6. `memoria hook` must NEVER block an agent: always exits 0, never writes stdout (some agents inject hook stdout as model context).
