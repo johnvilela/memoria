@@ -11,85 +11,104 @@ import (
 	"time"
 )
 
-// hookFields whitelists what each hook saves. Empty list = timestamp-only
-// marker line. Hooks absent from both maps ("other") keep the full payload
-// minus noiseKeys.
-var hookFields = map[string][]string{
-	"session-start": {"source"},
-	"user-prompt":   {"prompt"},
-	"pre-tool-use":  {"tool_name"},
-	"post-tool-use": {"tool_name", "tool_input", "tool_response"},
-	"stop":          {"last_assistant_message"},
-	"subagent-stop": {"agent_type", "last_assistant_message"},
-	"session-end":   {"reason"},
-	"pre-compact":   {},
-	"post-compact":  {},
+// flat collapses whitespace runs into single spaces. Digest lines are one
+// event per line, unbounded length.
+func flat(s string) string { return strings.Join(strings.Fields(s), " ") }
+
+// collapse squashes whitespace runs into single spaces and truncates to max
+// runes with an ellipsis.
+func collapse(s string, max int) string {
+	s = flat(s)
+	if r := []rune(s); len(r) > max {
+		s = string(r[:max]) + "..."
+	}
+	return s
 }
 
-// skipHooks carry nothing worth saving; no line is written.
-var skipHooks = map[string]bool{"notification": true, "subagent-start": true}
-
-// noiseKeys are stripped from "other" payloads: ids, paths, and agent
-// bookkeeping present on every event.
-var noiseKeys = map[string]bool{
-	"session_id": true, "cwd": true, "hook_event_name": true,
-	"transcript_path": true, "prompt_id": true, "permission_mode": true,
-	"effort": true, "duration_ms": true, "tool_use_id": true,
-	"stop_hook_active": true, "background_tasks": true, "session_crons": true,
-	"agent_id": true, "agent_transcript_path": true,
+// renderEvent returns the "@hook ..." digest line for an event, or "" for
+// events not worth digesting (pre-tool-use, Read, notifications, unknowns).
+func renderEvent(name string, payload map[string]any) string {
+	str := func(k string) string { s, _ := payload[k].(string); return s }
+	switch name {
+	case "session-start":
+		if s := str("source"); s != "" {
+			return "@session-start source: " + s
+		}
+		return "@session-start"
+	case "user-prompt":
+		return "@user-prompt '" + flat(str("prompt")) + "'"
+	case "post-tool-use":
+		return renderTool(payload)
+	case "stop":
+		if m := flat(str("last_assistant_message")); m != "" {
+			return "@stop '" + m + "'"
+		}
+	case "subagent-stop":
+		line := "@subagent-stop"
+		if t := str("agent_type"); t != "" {
+			line += " " + t
+		}
+		if m := flat(str("last_assistant_message")); m != "" {
+			line += " '" + m + "'"
+		}
+		if line != "@subagent-stop" {
+			return line
+		}
+	case "pre-compact", "post-compact":
+		return "@" + name
+	case "session-end":
+		if r := str("reason"); r != "" {
+			return "@session-end reason: " + r
+		}
+		return "@session-end"
+	}
+	return ""
 }
 
-// filterPayload reduces payload to what's worth keeping for the given hook.
-// ok=false means the event should not be logged at all.
-func filterPayload(name string, payload map[string]any) (map[string]any, bool) {
-	if skipHooks[name] {
-		return nil, false
-	}
-	fields, known := hookFields[name]
-	kept := map[string]any{}
-	if !known { // "other": unknown shape, keep everything but noise
-		for k, v := range payload {
-			if !noiseKeys[k] {
-				kept[k] = v
-			}
+// renderTool renders Write/Edit/NotebookEdit/Bash post-tool-use events; other
+// tools (Read, Grep, ...) are noise in a digest. Deleted files surface as
+// Bash rm lines.
+func renderTool(payload map[string]any) string {
+	tool, _ := payload["tool_name"].(string)
+	input, _ := payload["tool_input"].(map[string]any)
+	var detail string
+	switch tool {
+	case "Write":
+		detail, _ = input["file_path"].(string)
+	case "Edit", "NotebookEdit":
+		tool = "Edit"
+		detail, _ = input["file_path"].(string)
+	case "Bash":
+		if cmd, _ := input["command"].(string); cmd != "" {
+			detail = "'" + flat(cmd) + "'"
 		}
-	} else {
-		for _, k := range fields {
-			if v, ok := payload[k]; ok {
-				kept[k] = v
-			}
-		}
+	default:
+		return ""
 	}
-	return dropEmpty(kept), true
+	if detail == "" {
+		return ""
+	}
+	line := "@post-tool-use " + tool + " " + detail
+	if e := toolError(payload["tool_response"]); e != "" {
+		line += " error: '" + e + "'"
+	}
+	return line
 }
 
-// dropEmpty removes "", false, empty arrays and empty maps, recursively.
-// ponytail: false counts as empty — flags like interrupted:false are noise,
-// interrupted:true survives.
-func dropEmpty(m map[string]any) map[string]any {
-	for k, v := range m {
-		switch t := v.(type) {
-		case nil:
-			delete(m, k)
-		case string:
-			if t == "" {
-				delete(m, k)
-			}
-		case bool:
-			if !t {
-				delete(m, k)
-			}
-		case []any:
-			if len(t) == 0 {
-				delete(m, k)
-			}
-		case map[string]any:
-			if len(dropEmpty(t)) == 0 {
-				delete(m, k)
-			}
-		}
+// toolError extracts an error message from a tool_response.
+// ponytail: error/is_error keys only; stderr heuristics if this misses too much
+func toolError(resp any) string {
+	m, ok := resp.(map[string]any)
+	if !ok {
+		return ""
 	}
-	return m
+	if e, _ := m["error"].(string); e != "" {
+		return flat(e)
+	}
+	if isErr, _ := m["is_error"].(bool); isErr {
+		return "unspecified"
+	}
+	return ""
 }
 
 // indexSession appends "DATETIME - SESSION_ID - NAME" to
@@ -107,10 +126,7 @@ func indexSession(proj, sid, prompt string) error {
 	if strings.Contains(string(existing), " - "+sid+" - ") {
 		return nil
 	}
-	name := strings.Join(strings.Fields(prompt), " ")
-	if r := []rune(name); len(r) > 80 {
-		name = string(r[:80]) + "..."
-	}
+	name := collapse(prompt, 80)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
@@ -123,13 +139,16 @@ func indexSession(proj, sid, prompt string) error {
 	return err
 }
 
-// captureHook appends "DATETIME - HOOK_NAME - DATA" (DATA filtered per hook,
-// omitted when empty) to <project>/.memoria/sessions/<session_id>.md for
-// tracked projects. Untracked project, missing config, or bad payload →
-// silent no-op.
+// captureHook appends the event as an "@hook ..." line to the session digest
+// at <project>/.memoria/sessions/pending/<session_id>.md for tracked
+// projects. Untracked project, missing config, or bad payload → silent no-op.
 func captureHook(name string, stdin io.Reader, configPath string) error {
+	// set by tooling (tests, nested agents) so their sessions aren't captured
+	if os.Getenv("MEMORIA_NO_CAPTURE") != "" {
+		return nil
+	}
 	if !slices.Contains(canonicalHooks, name) {
-		name = "other"
+		return nil
 	}
 	var payload map[string]any
 	if err := json.NewDecoder(stdin).Decode(&payload); err != nil {
@@ -148,9 +167,11 @@ func captureHook(name string, stdin io.Reader, configPath string) error {
 	if proj == "" {
 		return nil
 	}
-	kept, ok := filterPayload(name, payload)
-	if !ok {
-		return nil
+	projName := filepath.Base(proj)
+	for _, p := range cfg.Projects {
+		if filepath.Clean(p.Path) == proj {
+			projName = p.Name
+		}
 	}
 	if name == "user-prompt" {
 		prompt, _ := payload["prompt"].(string)
@@ -158,24 +179,70 @@ func captureHook(name string, stdin io.Reader, configPath string) error {
 			return err
 		}
 	}
+	return appendDigest(proj, projName, sid, name, payload)
+}
 
-	dir := filepath.Join(proj, ".memoria", "sessions")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+// appendDigest ensures the digest file exists (frontmatter written on first
+// event, whichever hook that is) and appends the rendered event line.
+func appendDigest(proj, projName, sid, name string, payload map[string]any) error {
+	line := renderEvent(name, payload)
+	if line == "" {
+		return nil
+	}
+	path := filepath.Join(proj, ".memoria", "sessions", "pending", sid+".md")
+	now := time.Now().Format(time.RFC3339)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	line := fmt.Sprintf("%s - %s", time.Now().Format(time.RFC3339), name)
-	if len(kept) > 0 {
-		data, err := json.Marshal(kept)
-		if err != nil {
+	// O_EXCL: only the first event of a session writes the frontmatter
+	if f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644); err == nil {
+		fmt.Fprintf(f, `---
+schema_version: 2
+kind: session-digest
+session_id: %s
+project: %s
+project_root: %s
+started_at: %s
+---
+
+`, sid, projName, proj, now)
+		f.Close()
+	} else if !os.IsExist(err) {
+		return err
+	}
+	if name == "session-end" {
+		if err := setEndedAt(path, now); err != nil {
 			return err
 		}
-		line += " - " + string(data)
 	}
-	f, err := os.OpenFile(filepath.Join(dir, sid+".md"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
 	_, err = fmt.Fprintln(f, line)
 	return err
+}
+
+// setEndedAt inserts or updates "ended_at:" in the digest's frontmatter.
+func setEndedAt(path, ts string) error {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	lines := strings.Split(string(b), "\n")
+	if len(lines) == 0 || lines[0] != "---" {
+		return nil
+	}
+	for i := 1; i < len(lines); i++ {
+		if strings.HasPrefix(lines[i], "ended_at:") {
+			lines[i] = "ended_at: " + ts
+			return os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0o644)
+		}
+		if lines[i] == "---" {
+			lines = slices.Insert(lines, i, "ended_at: "+ts)
+			return os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0o644)
+		}
+	}
+	return nil
 }

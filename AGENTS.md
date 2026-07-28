@@ -40,19 +40,34 @@ Differentiator vs. existing solutions: hooks + cronjobs + markdown files, human-
 | `help` / `--help` / `-h` | done | ASCII art + command list |
 | `init <claude-code\|codex>` | done | Install memoria hooks globally for the chosen agent |
 | `bootstrap` | done | Register the current folder (name + path) as a tracked project in config.yaml; gitignores `.memoria/` and creates the wiki folder |
-| `hook <name>` | done (internal) | Called by agent hooks; captures session data |
+| `hook <name>` | done (internal) | Called by agent hooks; appends events to the session digest |
 
 ## How hooks flow
 
 1. `memoria init claude-code` merges command hooks into `~/.claude/settings.json` (Codex: `~/.codex/hooks.json`, same JSON shape; Codex lacks the Notification event and needs one-time `/hooks` trust in its TUI). Idempotent; preserves existing settings/hooks; uses the absolute binary path.
-2. Each agent event runs `memoria hook <canonical-name>` with a JSON payload on stdin (`session_id`, `cwd`, `hook_event_name`, ...). Canonical names: `session-start user-prompt pre-tool-use post-tool-use pre-compact post-compact notification stop session-end subagent-start subagent-stop`; unknown names log as `other`.
+2. Each agent event runs `memoria hook <canonical-name>` with a JSON payload on stdin (`session_id`, `cwd`, `hook_event_name`, ...). Canonical names: `session-start user-prompt pre-tool-use post-tool-use pre-compact post-compact notification stop session-end subagent-start subagent-stop`; unknown names are ignored.
 3. Hooks are global, but capture only happens for projects opted-in via `~/.config/memoria/config.yaml`. Run `memoria bootstrap` inside a project to register it (idempotent):
    ```yaml
    projects:
      - name: some-project
        path: /home/me/dev/some-project
    ```
-   `cwd` is matched by longest path prefix; untracked projects are silently ignored. Bootstrap also appends `.memoria/` to the project's `.gitignore` (raw captures stay untracked) and creates `wiki/` with a `.gitkeep` (the curated wiki is meant to be versioned). An existing wiki folder is an error — pick another name with `--wiki <name>`, saved as `wiki:` on the project entry (empty = `wiki`).
-4. Captured lines append chronologically to `<project>/.memoria/sessions/<session_id>.md` as `DATETIME - HOOK_NAME - DATA` (RFC3339 local time). DATA is a per-hook whitelist (`hookFields` in `hook.go`), not the full payload: `user-prompt`→prompt, `post-tool-use`→tool_name+input+response, `pre-tool-use`→tool_name, `stop`/`subagent-stop`→last_assistant_message, `session-start`→source, `session-end`→reason, `other`→payload minus noise keys. `pre/post-compact` write a timestamp-only marker; `notification` and `subagent-start` write nothing. Empty values (`""`, `false`, `[]`, `{}`) are dropped.
+   `cwd` is matched by longest path prefix; untracked projects are silently ignored. Bootstrap also appends `.memoria/` to the project's `.gitignore` (captures stay untracked) and creates `wiki/` with a `.gitkeep` (the curated wiki is meant to be versioned). An existing wiki folder is an error — pick another name with `--wiki <name>`, saved as `wiki:` on the project entry (empty = `wiki`).
+4. Captured events append chronologically to the session digest at `<project>/.memoria/sessions/pending/<session_id>.md` as `@hook` annotated lines (see "How digests flow"). Events not worth digesting write nothing: `pre-tool-use`, `notification`, `subagent-start`, unknown hooks, and tools other than Write/Edit/NotebookEdit/Bash.
 5. `<project>/.memoria/sessions.md` indexes sessions as `DATETIME - SESSION_ID - NAME` — the name is the session's first user prompt (whitespace-collapsed, truncated to 80 runes). One entry per session id.
 6. `memoria hook` must NEVER block an agent: always exits 0, never writes stdout (some agents inject hook stdout as model context).
+
+## How digests flow
+
+1. Hooks write the digest directly — there is no separate digest command, raw log, or AI pass. The first captured event of a session creates `.memoria/sessions/pending/<sid>.md` with YAML frontmatter (`schema_version: 2`, `kind: session-digest`, `session_id`, `project`, `project_root`, `started_at`); every event then appends one `@hook` line (`renderEvent` in `hook.go`):
+   ```
+   @session-start source: startup
+   @user-prompt 'Can you create something'
+   @post-tool-use Write /path/file.go
+   @post-tool-use Bash 'go build' error: 'exit status 1: undefined: foo'
+   @stop 'Done. Created the file.'
+   @session-end reason: exit
+   ```
+2. Lines are whitespace-collapsed but never truncated. Write → `Write /path`; Edit/NotebookEdit → `Edit /path`; Bash → full command; a `tool_response` with a non-empty `error` (or `is_error`) appends ` error: '...'`. Deleted files surface as Bash `rm` lines; recoveries are visible from event order.
+3. `session-end` also inserts/updates `ended_at:` in the frontmatter (`setEndedAt`).
+4. Recursion guard: `MEMORIA_NO_CAPTURE=1` makes `memoria hook` skip capture entirely (used by tooling/nested agent sessions).

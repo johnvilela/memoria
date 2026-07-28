@@ -29,9 +29,8 @@ memoria init claude-code   # or: memoria init codex
 cd ~/dev/my-project
 memoria bootstrap
 
-# 3. Work with your agent as usual — sessions are captured automatically.
-#    When a session ends, a digest is generated. Or run it manually:
-memoria digest --last
+# 3. Work with your agent as usual — sessions are digested automatically
+#    into .memoria/sessions/pending/<session_id>.md
 ```
 
 ## Commands
@@ -41,15 +40,13 @@ memoria digest --last
 | `help` | Show usage |
 | `init <claude-code\|codex>` | Install memoria hooks globally for the chosen agent |
 | `bootstrap` | Register the current folder as a tracked project; gitignores `.memoria/` and creates the wiki folder |
-| `digest <sid> \| --last` | Digest a session's raw log into `.memoria/sessions/pending/<sid>.md` (`--no-enrich` skips the AI pass) |
 | `hook <name>` | Internal — called by agent hooks to capture session data |
 
 ## How it works
 
 - **Hooks** — `memoria init` wires agent hooks (Claude Code, Codex) that run `memoria hook <event>` on each session event. Hooks are global, but only projects registered with `memoria bootstrap` are captured; everything else is ignored. Hooks never block the agent.
-- **Raw capture** — events append to `<project>/.memoria/raw/<session_id>.jsonl`; sessions are indexed in `.memoria/sessions.md` by their first user prompt.
-- **Digests** — `memoria digest` parses a raw log into a structured markdown digest, then optionally enriches it with an AI CLI (`claude -p` by default, configurable via `enrich_cmd`). The `session-end` hook triggers this automatically.
-- **Markdown in the repo** — raw captures stay untracked (`.memoria/` is gitignored); the curated `wiki/` folder is meant to be committed.
+- **Live digests** — each event appends an `@hook` annotated line to `<project>/.memoria/sessions/pending/<session_id>.md` (YAML frontmatter + chronological stream: full prompts, file writes/edits, Bash commands with errors, assistant stop messages). Sessions are indexed in `.memoria/sessions.md` by their first user prompt.
+- **Markdown in the repo** — session digests stay untracked (`.memoria/` is gitignored); the curated `wiki/` folder is meant to be committed.
 
 Config lives at `~/.config/memoria/config.yaml`.
 

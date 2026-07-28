@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 )
 
 // writes a config.yaml tracking the given projects, returns its path
@@ -29,127 +30,107 @@ func payload(sid, cwd string) *strings.Reader {
 	return strings.NewReader(fmt.Sprintf(`{"session_id":%q,"cwd":%q,"hook_event_name":"X"}`, sid, cwd))
 }
 
-func sessionFile(proj, sid string) string {
-	return filepath.Join(proj, ".memoria", "sessions", sid+".md")
+func digestFile(proj, sid string) string {
+	return filepath.Join(proj, ".memoria", "sessions", "pending", sid+".md")
 }
 
-var lineRe = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[^ ]* - user-prompt - \{"prompt":"hello"\}$`)
-
-func TestCaptureHookWritesLine(t *testing.T) {
-	proj := t.TempDir()
-	cfg := testConfig(t, proj)
-	in := strings.NewReader(fmt.Sprintf(`{"session_id":"abc123","cwd":%q,"prompt":"hello","permission_mode":"auto","transcript_path":"/x.jsonl"}`, proj))
-	if err := captureHook("user-prompt", in, cfg); err != nil {
-		t.Fatal(err)
-	}
-	b, err := os.ReadFile(sessionFile(proj, "abc123"))
+func readDigest(t *testing.T, proj, sid string) string {
+	t.Helper()
+	b, err := os.ReadFile(digestFile(proj, sid))
 	if err != nil {
 		t.Fatal(err)
 	}
-	line := strings.TrimSuffix(string(b), "\n")
-	if !lineRe.MatchString(line) {
-		t.Fatalf("line %q does not match filtered DATETIME - HOOK - DATA pattern", line)
+	return string(b)
+}
+
+func TestCaptureHookWritesDigest(t *testing.T) {
+	proj := t.TempDir()
+	cfg := testConfig(t, proj)
+	in := strings.NewReader(fmt.Sprintf(`{"session_id":"abc123","cwd":%q,"prompt":"hello\nworld","permission_mode":"auto"}`, proj))
+	if err := captureHook("user-prompt", in, cfg); err != nil {
+		t.Fatal(err)
+	}
+	got := readDigest(t, proj, "abc123")
+	for _, w := range []string{
+		"schema_version: 2", "kind: session-digest", "session_id: abc123",
+		"project: " + filepath.Base(proj), "project_root: " + proj,
+		"@user-prompt 'hello world'",
+	} {
+		if !strings.Contains(got, w) {
+			t.Fatalf("digest missing %q:\n%s", w, got)
+		}
+	}
+	m := regexp.MustCompile(`started_at: (\S+)`).FindStringSubmatch(got)
+	if m == nil {
+		t.Fatalf("no started_at:\n%s", got)
+	}
+	if _, err := time.Parse(time.RFC3339, m[1]); err != nil {
+		t.Fatalf("started_at %q not RFC3339: %v", m[1], err)
 	}
 }
 
 func TestCaptureHookAppendsChronologically(t *testing.T) {
 	proj := t.TempDir()
 	cfg := testConfig(t, proj)
-	for _, name := range []string{"session-start", "stop"} {
-		if err := captureHook(name, payload("s1", proj), cfg); err != nil {
-			t.Fatal(err)
-		}
-	}
-	b, _ := os.ReadFile(sessionFile(proj, "s1"))
-	lines := strings.Split(strings.TrimSpace(string(b)), "\n")
-	if len(lines) != 2 {
-		t.Fatalf("lines = %d, want 2", len(lines))
-	}
-	if !strings.Contains(lines[0], " - session-start") || !strings.Contains(lines[1], " - stop") {
-		t.Fatalf("wrong order: %v", lines)
-	}
-}
-
-func TestCaptureHookSubdirCwd(t *testing.T) {
-	proj := t.TempDir()
-	sub := filepath.Join(proj, "src", "deep")
-	cfg := testConfig(t, proj)
-	if err := captureHook("stop", payload("s2", sub), cfg); err != nil {
+	if err := captureHook("session-start", payload("s1", proj), cfg); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(sessionFile(proj, "s2")); err != nil {
-		t.Fatal("session file not written to project root")
-	}
-}
-
-func TestCaptureHookUntrackedProject(t *testing.T) {
-	proj := t.TempDir()
-	other := t.TempDir()
-	cfg := testConfig(t, proj)
-	if err := captureHook("stop", payload("s3", other), cfg); err != nil {
+	if err := captureHook("user-prompt", promptPayload("s1", proj, "hi"), cfg); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(other, ".memoria")); !os.IsNotExist(err) {
-		t.Fatal(".memoria created in untracked project")
+	got := readDigest(t, proj, "s1")
+	if strings.Count(got, "---") != 2 {
+		t.Fatalf("frontmatter written more than once:\n%s", got)
+	}
+	if strings.Index(got, "@session-start") > strings.Index(got, "@user-prompt") {
+		t.Fatalf("events out of order:\n%s", got)
 	}
 }
 
-func TestCaptureHookUnknownNameLogsOther(t *testing.T) {
-	proj := t.TempDir()
-	cfg := testConfig(t, proj)
-	in := strings.NewReader(fmt.Sprintf(`{"session_id":"s4","cwd":%q,"custom_field":"kept"}`, proj))
-	if err := captureHook("weird-future-event", in, cfg); err != nil {
-		t.Fatal(err)
-	}
-	b, _ := os.ReadFile(sessionFile(proj, "s4"))
-	if !strings.Contains(string(b), ` - other - {"custom_field":"kept"}`) {
-		t.Fatalf("unknown hook not logged as other with noise stripped: %s", b)
-	}
-}
-
-func TestCaptureHookFiltersPerHook(t *testing.T) {
+func TestRenderEvent(t *testing.T) {
 	cases := []struct {
-		hook    string
-		extra   string // extra JSON fields injected into the payload
-		want    string // expected line suffix after "HOOK"
-		notWant []string
+		name    string
+		payload string // JSON
+		want    string
 	}{
-		{"pre-tool-use", `"tool_name":"Bash","tool_input":{"command":"ls"}`,
-			` - pre-tool-use - {"tool_name":"Bash"}`, []string{"tool_input"}},
-		{"post-tool-use", `"tool_name":"Bash","tool_input":{"command":"ls"},"tool_response":{"stdout":"ok","stderr":"","interrupted":false,"isImage":false},"duration_ms":30`,
-			`"stdout":"ok"`, []string{"stderr", "interrupted", "isImage", "duration_ms"}},
-		{"stop", `"last_assistant_message":"done","background_tasks":[]`,
-			` - stop - {"last_assistant_message":"done"}`, []string{"background_tasks"}},
-		{"subagent-stop", `"last_assistant_message":"sub done","agent_type":"","agent_id":"x1"`,
-			` - subagent-stop - {"last_assistant_message":"sub done"}`, []string{"agent_id", "agent_type"}},
-		{"session-start", `"source":"startup"`,
-			` - session-start - {"source":"startup"}`, nil},
-		{"session-end", `"reason":"exit"`,
-			` - session-end - {"reason":"exit"}`, nil},
+		{"session-start", `{"source":"startup"}`, "@session-start source: startup"},
+		{"session-start", `{}`, "@session-start"},
+		{"user-prompt", `{"prompt":"fix   the\nbug"}`, "@user-prompt 'fix the bug'"},
+		{"post-tool-use", `{"tool_name":"Write","tool_input":{"file_path":"/a/b.go"}}`, "@post-tool-use Write /a/b.go"},
+		{"post-tool-use", `{"tool_name":"Edit","tool_input":{"file_path":"/a/b.go"}}`, "@post-tool-use Edit /a/b.go"},
+		{"post-tool-use", `{"tool_name":"NotebookEdit","tool_input":{"file_path":"/n.ipynb"}}`, "@post-tool-use Edit /n.ipynb"},
+		{"post-tool-use", `{"tool_name":"Bash","tool_input":{"command":"go test  ./..."}}`, "@post-tool-use Bash 'go test ./...'"},
+		{"post-tool-use", `{"tool_name":"Bash","tool_input":{"command":"go build"},"tool_response":{"error":"exit 1:\nundefined: foo"}}`,
+			"@post-tool-use Bash 'go build' error: 'exit 1: undefined: foo'"},
+		{"post-tool-use", `{"tool_name":"Bash","tool_input":{"command":"x"},"tool_response":{"is_error":true}}`,
+			"@post-tool-use Bash 'x' error: 'unspecified'"},
+		{"post-tool-use", `{"tool_name":"Read","tool_input":{"file_path":"/a/b.go"}}`, ""},
+		{"post-tool-use", `{"tool_name":"Grep","tool_input":{"pattern":"x"}}`, ""},
+		{"pre-tool-use", `{"tool_name":"Bash"}`, ""},
+		{"stop", `{"last_assistant_message":"done,\ntests pass"}`, "@stop 'done, tests pass'"},
+		{"stop", `{}`, ""},
+		{"subagent-stop", `{"agent_type":"Explore","last_assistant_message":"found it"}`, "@subagent-stop Explore 'found it'"},
+		{"subagent-stop", `{}`, ""},
+		{"pre-compact", `{}`, "@pre-compact"},
+		{"post-compact", `{}`, "@post-compact"},
+		{"session-end", `{"reason":"exit"}`, "@session-end reason: exit"},
+		{"session-end", `{}`, "@session-end"},
+		{"notification", `{"message":"x"}`, ""},
+		{"subagent-start", `{}`, ""},
 	}
 	for _, tc := range cases {
-		t.Run(tc.hook, func(t *testing.T) {
-			proj := t.TempDir()
-			cfg := testConfig(t, proj)
-			in := strings.NewReader(fmt.Sprintf(`{"session_id":"sf","cwd":%q,%s}`, proj, tc.extra))
-			if err := captureHook(tc.hook, in, cfg); err != nil {
-				t.Fatal(err)
-			}
-			b, _ := os.ReadFile(sessionFile(proj, "sf"))
-			if !strings.Contains(string(b), tc.want) {
-				t.Fatalf("line %q missing %q", b, tc.want)
-			}
-			for _, nw := range tc.notWant {
-				if strings.Contains(string(b), nw) {
-					t.Fatalf("line %q should not contain %q", b, nw)
-				}
-			}
-		})
+		var p map[string]any
+		if err := json.Unmarshal([]byte(tc.payload), &p); err != nil {
+			t.Fatal(err)
+		}
+		if got := renderEvent(tc.name, p); got != tc.want {
+			t.Errorf("renderEvent(%s, %s) = %q, want %q", tc.name, tc.payload, got, tc.want)
+		}
 	}
 }
 
 func TestCaptureHookSkipsNoiseHooks(t *testing.T) {
-	for _, hook := range []string{"notification", "subagent-start"} {
+	for _, hook := range []string{"notification", "subagent-start", "pre-tool-use", "weird-future-event"} {
 		proj := t.TempDir()
 		cfg := testConfig(t, proj)
 		if err := captureHook(hook, payload("s6", proj), cfg); err != nil {
@@ -161,16 +142,60 @@ func TestCaptureHookSkipsNoiseHooks(t *testing.T) {
 	}
 }
 
-func TestCaptureHookCompactMarker(t *testing.T) {
+func TestCaptureHookSessionEnd(t *testing.T) {
 	proj := t.TempDir()
 	cfg := testConfig(t, proj)
-	if err := captureHook("pre-compact", payload("s7", proj), cfg); err != nil {
+	if err := captureHook("user-prompt", promptPayload("s1", proj, "hi"), cfg); err != nil {
 		t.Fatal(err)
 	}
-	b, _ := os.ReadFile(sessionFile(proj, "s7"))
-	line := strings.TrimSuffix(string(b), "\n")
-	if !strings.HasSuffix(line, " - pre-compact") {
-		t.Fatalf("compact marker line %q should end with hook name, no data", line)
+	in := strings.NewReader(fmt.Sprintf(`{"session_id":"s1","cwd":%q,"reason":"exit"}`, proj))
+	if err := captureHook("session-end", in, cfg); err != nil {
+		t.Fatal(err)
+	}
+	got := readDigest(t, proj, "s1")
+	head := got[:strings.Index(got, "\n---\n")] // frontmatter block
+	if !strings.Contains(head, "ended_at: ") {
+		t.Fatalf("ended_at not in frontmatter:\n%s", got)
+	}
+	if !strings.HasSuffix(strings.TrimSpace(got), "@session-end reason: exit") {
+		t.Fatalf("@session-end not last line:\n%s", got)
+	}
+}
+
+func TestCaptureHookSessionEndFirstEvent(t *testing.T) {
+	proj := t.TempDir()
+	cfg := testConfig(t, proj)
+	if err := captureHook("session-end", payload("s1", proj), cfg); err != nil {
+		t.Fatal(err)
+	}
+	got := readDigest(t, proj, "s1")
+	if !strings.Contains(got, "kind: session-digest") || !strings.Contains(got, "ended_at: ") ||
+		!strings.Contains(got, "@session-end") {
+		t.Fatalf("lone session-end digest wrong:\n%s", got)
+	}
+}
+
+func TestCaptureHookSubdirCwd(t *testing.T) {
+	proj := t.TempDir()
+	sub := filepath.Join(proj, "src", "deep")
+	cfg := testConfig(t, proj)
+	if err := captureHook("user-prompt", promptPayload("s2", sub, "hi"), cfg); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(digestFile(proj, "s2")); err != nil {
+		t.Fatal("digest not written to project root")
+	}
+}
+
+func TestCaptureHookUntrackedProject(t *testing.T) {
+	proj := t.TempDir()
+	other := t.TempDir()
+	cfg := testConfig(t, proj)
+	if err := captureHook("user-prompt", promptPayload("s3", other, "hi"), cfg); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(other, ".memoria")); !os.IsNotExist(err) {
+		t.Fatal(".memoria created in untracked project")
 	}
 }
 
@@ -188,7 +213,7 @@ func TestCaptureHookRejectsBadSessionID(t *testing.T) {
 	proj := t.TempDir()
 	cfg := testConfig(t, proj)
 	for _, sid := range []string{"../evil", "a/b", ".", ".."} {
-		if err := captureHook("stop", payload(sid, proj), cfg); err != nil {
+		if err := captureHook("user-prompt", promptPayload(sid, proj, "hi"), cfg); err != nil {
 			t.Fatalf("sid %q: want silent skip, got %v", sid, err)
 		}
 	}
@@ -267,6 +292,18 @@ func TestIndexSessionSanitizesName(t *testing.T) {
 	}
 	if !strings.HasSuffix(name, "...") {
 		t.Fatalf("truncated name missing ellipsis: %q", name)
+	}
+}
+
+func TestCaptureHookNoCaptureEnv(t *testing.T) {
+	t.Setenv("MEMORIA_NO_CAPTURE", "1")
+	proj := t.TempDir()
+	cfg := testConfig(t, proj)
+	if err := captureHook("user-prompt", promptPayload("s1", proj, "hi"), cfg); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(proj, ".memoria")); !os.IsNotExist(err) {
+		t.Fatal("captured despite MEMORIA_NO_CAPTURE")
 	}
 }
 
