@@ -68,6 +68,49 @@ func statusSet(path, projName, state string, pid int, detail string) error {
 	return os.WriteFile(path, b, 0o644)
 }
 
+// runLogPath is where a project's detached run writes its stdout/stderr,
+// truncated on each new run. process/lint/seed share it — one background job
+// per project at a time.
+func runLogPath(configPath, projName string) string {
+	return filepath.Join(filepath.Dir(configPath), projName+".run.log")
+}
+
+// inspectPoll is a var so tests can speed the tail loop up.
+var inspectPoll = 500 * time.Millisecond
+
+// inspectProcess streams the running background job's output until it exits,
+// then prints the final status. Detaching (ctrl-c) doesn't touch the job.
+func inspectProcess(configPath, projName string, out io.Writer) int {
+	sPath := statusPath(configPath)
+	st, err := loadStatus(sPath)
+	if err != nil {
+		fmt.Fprintln(out, "error:", err)
+		return 1
+	}
+	e := st[projName]
+	if e.State != "running" || !pidAlive(e.PID) {
+		fmt.Fprintf(out, "No background run for %s — memoria status has the last result.\n", projName)
+		return 0
+	}
+	f, err := os.Open(runLogPath(configPath, projName))
+	if err != nil {
+		fmt.Fprintln(out, "error:", err)
+		return 1
+	}
+	defer f.Close()
+	fmt.Fprintf(out, "Following pid %d (ctrl-c detaches, the run keeps going)\n", e.PID)
+	for pidAlive(e.PID) {
+		_, _ = io.Copy(out, f)
+		time.Sleep(inspectPoll)
+	}
+	_, _ = io.Copy(out, f)
+	if st, err := loadStatus(sPath); err == nil {
+		fe := st[projName]
+		fmt.Fprintf(out, "%s: %s — %s\n", projName, fe.State, fe.Detail)
+	}
+	return 0
+}
+
 // pidAlive reports whether the process exists (EPERM still means alive).
 func pidAlive(pid int) bool {
 	if pid <= 0 {

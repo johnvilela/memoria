@@ -3,9 +3,11 @@ package main
 import (
 	"bytes"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestStatusSetAndLoad(t *testing.T) {
@@ -52,6 +54,59 @@ func TestRunStatusEmpty(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), "No processing recorded") {
 		t.Fatalf("empty message missing: %s", buf.String())
+	}
+}
+
+func TestInspectNothingRunning(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+	if err := statusSet(statusPath(cfgPath), "proj", "done", 0, "proposal ready"); err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	if code := inspectProcess(cfgPath, "proj", &buf); code != 0 {
+		t.Fatalf("inspect = %d: %s", code, buf.String())
+	}
+	if !strings.Contains(buf.String(), "No background run") {
+		t.Fatalf("want no-run message, got: %s", buf.String())
+	}
+}
+
+// End to end with a real short-lived pid: inspect must stream the run log
+// while the process lives and print the final status once it exits.
+func TestInspectFollowsRunningJob(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+	origPoll := inspectPoll
+	inspectPoll = 20 * time.Millisecond
+	defer func() { inspectPoll = origPoll }()
+
+	job := exec.Command("sleep", "0.3")
+	if err := job.Start(); err != nil {
+		t.Fatal(err)
+	}
+	if err := statusSet(statusPath(cfgPath), "proj", "running", job.Process.Pid, ""); err != nil {
+		t.Fatal(err)
+	}
+	logFile := runLogPath(cfgPath, "proj")
+	if err := os.WriteFile(logFile, []byte("Invoking claude-code with 2 session(s)...\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		_ = job.Wait()
+		_ = statusSet(statusPath(cfgPath), "proj", "done", 0, "proposal ready: 5 pages")
+		f, _ := os.OpenFile(logFile, os.O_APPEND|os.O_WRONLY, 0o644)
+		f.WriteString("Proposal from 2 session(s)\n")
+		f.Close()
+	}()
+
+	var buf bytes.Buffer
+	if code := inspectProcess(cfgPath, "proj", &buf); code != 0 {
+		t.Fatalf("inspect = %d: %s", code, buf.String())
+	}
+	got := buf.String()
+	for _, w := range []string{"Following pid", "Invoking claude-code", "Proposal from 2 session(s)", "proposal ready: 5 pages"} {
+		if !strings.Contains(got, w) {
+			t.Fatalf("inspect output missing %q:\n%s", w, got)
+		}
 	}
 }
 

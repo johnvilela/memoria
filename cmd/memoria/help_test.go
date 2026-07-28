@@ -19,7 +19,7 @@ func TestRenderHelpContainsASCIIArt(t *testing.T) {
 
 func TestRenderHelpListsCommands(t *testing.T) {
 	out := renderHelp()
-	for _, want := range []string{"help", "init", "bootstrap", "hook", "(internal)"} {
+	for _, want := range []string{"help", "init", "setup", "process", "bootstrap", "hook", "(internal)"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("help output missing %q", want)
 		}

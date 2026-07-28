@@ -108,7 +108,7 @@ func detachLint(cwd, configPath, wikiRoot, projName string, out io.Writer) int {
 		fmt.Fprintf(out, "error: processing already running for %s (pid %d)\n", projName, st[projName].PID)
 		return 1
 	}
-	pid, err := spawnDetached(cwd, "lint", "--foreground")
+	pid, err := spawnDetached(cwd, runLogPath(configPath, projName), "lint", "--foreground")
 	if err != nil {
 		fmt.Fprintln(out, "error:", err)
 		return 1

@@ -19,6 +19,8 @@ type config struct {
 	Processor     string    `yaml:"processor,omitempty"`      // AI provider that processes sessions into wiki/memories
 	GeminiAPIKey  string    `yaml:"gemini_api_key,omitempty"` // only when processor is gemini
 	Notifications bool      `yaml:"notifications,omitempty"`  // desktop notification when background processing finishes
+	Cron          string    `yaml:"cron,omitempty"`           // schedule input, verbatim (systemd timer runs process --all)
+	CronApply     bool      `yaml:"cron_apply,omitempty"`     // timer applies proposals without review
 }
 
 func loadConfig(path string) (config, error) {

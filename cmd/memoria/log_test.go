@@ -16,10 +16,11 @@ import (
 func TestMain(m *testing.M) {
 	logPath = ""
 	isTTY = func() bool { return false }
-	spawnDetached = func(dir string, args ...string) (int, error) {
+	spawnDetached = func(dir, logFile string, args ...string) (int, error) {
 		return 0, fmt.Errorf("spawnDetached not stubbed")
 	}
 	notifyCmd = func(title, body string) error { return nil } // never shell out to notify-send
+	runSystemctl = func(args ...string) error { return nil }  // never touch the real systemd
 	os.Exit(m.Run())
 }
 

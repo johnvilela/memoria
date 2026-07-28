@@ -42,15 +42,23 @@ type proposal struct {
 	Pages       []wikiPage `json:"pages"`
 }
 
-// spawnDetached re-execs the CLI in its own session with no stdio so long
-// processor runs never block the user's terminal or agent.
-var spawnDetached = func(dir string, args ...string) (int, error) {
+// spawnDetached re-execs the CLI in its own session so long processor runs
+// never block the user's terminal or agent. stdout/stderr land in logFile
+// (truncated per run) so `memoria process --inspect` can follow along.
+var spawnDetached = func(dir, logFile string, args ...string) (int, error) {
 	exe, err := os.Executable()
 	if err != nil {
 		return 0, err
 	}
+	lf, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	if err != nil {
+		return 0, err
+	}
+	defer lf.Close()
 	cmd := exec.Command(exe, args...)
 	cmd.Dir = dir
+	cmd.Stdout = lf
+	cmd.Stderr = lf
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := cmd.Start(); err != nil {
 		return 0, err
@@ -69,6 +77,8 @@ func runProcess(cwd, configPath string, args []string, out io.Writer) int {
 	fs.SetOutput(out)
 	apply := fs.Bool("apply", false, "write the reviewed proposal to the wiki")
 	foreground := fs.Bool("foreground", false, "run the processor in this terminal instead of detaching")
+	inspect := fs.Bool("inspect", false, "follow the running background process until it finishes")
+	all := fs.Bool("all", false, "sweep every tracked project (the systemd timer's entrypoint)")
 	if err := fs.Parse(args); err != nil {
 		return 1
 	}
@@ -76,6 +86,9 @@ func runProcess(cwd, configPath string, args []string, out io.Writer) int {
 	if err != nil {
 		fmt.Fprintln(out, "error:", err)
 		return 1
+	}
+	if *all {
+		return processAll(cfg, configPath, *apply, out)
 	}
 	proj := matchProject(cwd, cfg.Projects)
 	if proj == "" {
@@ -90,6 +103,9 @@ func runProcess(cwd, configPath string, args []string, out io.Writer) int {
 	wikiRoot := filepath.Join(proj, wikiName)
 	proposalPath := filepath.Join(proj, ".memoria", "proposal.json")
 
+	if *inspect {
+		return inspectProcess(configPath, p.Name, out)
+	}
 	if *apply {
 		return applyProposal(proj, wikiRoot, proposalPath, queuePath(configPath), p.Name, out)
 	}
@@ -117,7 +133,7 @@ func detachProcess(cwd, configPath, projName string, out io.Writer) int {
 		fmt.Fprintf(out, "error: processing already running for %s (pid %d)\n", projName, st[projName].PID)
 		return 1
 	}
-	pid, err := spawnDetached(cwd, "process", "--foreground")
+	pid, err := spawnDetached(cwd, runLogPath(configPath, projName), "process", "--foreground")
 	if err != nil {
 		fmt.Fprintln(out, "error:", err)
 		return 1
@@ -127,7 +143,58 @@ func detachProcess(cwd, configPath, projName string, out io.Writer) int {
 	}
 	logf("process", "%s: detached pid %d for %d sessions", projName, pid, len(sessions))
 	fmt.Fprintf(out, "Processing %d session(s) in background (pid %d).\n", len(sessions), pid)
-	fmt.Fprintln(out, "Follow with: memoria status — the proposal lands at .memoria/proposal.json")
+	fmt.Fprintln(out, "Follow with: memoria process --inspect — the proposal lands at .memoria/proposal.json")
+	return 0
+}
+
+// processAll sweeps every tracked project with ended pending sessions — no
+// cwd needed. Sequential on purpose: status.yaml and pending.yaml are
+// read-modify-write without locking. With apply, proposals are written to the
+// wiki immediately after generation (no human review).
+func processAll(cfg config, configPath string, apply bool, out io.Writer) int {
+	worked, failed := 0, 0
+	for _, p := range cfg.Projects {
+		root := filepath.Clean(p.Path)
+		sessions, _, err := collectEnded(queuePath(configPath), p.Name)
+		if err != nil {
+			fmt.Fprintln(out, "error:", err)
+			failed++
+			continue
+		}
+		if len(sessions) == 0 {
+			continue
+		}
+		sPath := statusPath(configPath)
+		if st, _ := loadStatus(sPath); st[p.Name].State == "running" && pidAlive(st[p.Name].PID) {
+			fmt.Fprintf(out, "%s: processing already running (pid %d), skipped\n", p.Name, st[p.Name].PID)
+			continue
+		}
+		if err := statusSet(sPath, p.Name, "running", os.Getpid(), ""); err != nil {
+			logf("process", "%s: status: %v", p.Name, err)
+		}
+		wikiName := p.Wiki
+		if wikiName == "" {
+			wikiName = "wiki"
+		}
+		wikiRoot := filepath.Join(root, wikiName)
+		proposalPath := filepath.Join(root, ".memoria", "proposal.json")
+		worked++
+		if code := generateProposal(cfg, root, wikiRoot, proposalPath, configPath, p.Name, out); code != 0 {
+			failed++
+			continue
+		}
+		if apply {
+			if code := applyProposal(root, wikiRoot, proposalPath, queuePath(configPath), p.Name, out); code != 0 {
+				failed++
+			}
+		}
+	}
+	if worked == 0 {
+		fmt.Fprintln(out, "Nothing to process — no ended pending sessions")
+	}
+	if failed > 0 {
+		return 1
+	}
 	return 0
 }
 
@@ -186,6 +253,7 @@ func generateProposal(cfg config, proj, wikiRoot, proposalPath, configPath, proj
 		return fail(err)
 	}
 	prompt := buildPrompt(rules, readWiki(wikiRoot), digests)
+	fmt.Fprintf(out, "Invoking %s with %d session(s) — this can take a few minutes...\n", cfg.Processor, len(sessions))
 	raw, err := invokeProcessor(cfg, prompt)
 	if err != nil {
 		return fail(err)

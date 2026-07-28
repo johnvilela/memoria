@@ -142,9 +142,18 @@ func withSpinner(msg string, fn func() error) error {
 
 // promptSecret asks for a masked value (API keys).
 func promptSecret(title string) (string, error) {
+	return promptInput(title, textinput.EchoPassword)
+}
+
+// promptText asks for a plain-echo value (cron expressions).
+func promptText(title string) (string, error) {
+	return promptInput(title, textinput.EchoNormal)
+}
+
+func promptInput(title string, echo textinput.EchoMode) (string, error) {
 	in := textinput.New()
 	in.Prompt = title + ": "
-	in.EchoMode = textinput.EchoPassword
+	in.EchoMode = echo
 	in.Focus()
 	res, err := tea.NewProgram(secretModel{input: in}).Run()
 	if err != nil {

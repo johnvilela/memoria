@@ -37,8 +37,9 @@ var notificationOptions = []option{
 
 func runInit(args []string, configPath string, out io.Writer) int {
 	usage := func() {
-		fmt.Fprintln(out, "usage: memoria init [<client>] [--client claude-code|codex] [--processor claude-code|codex|ollama|gemini] [--notification]")
+		fmt.Fprintln(out, "usage: memoria init [<client>] [--client claude-code|codex] [--processor claude-code|codex|ollama|gemini] [--notification] [--cron [<expr|preset|off>]] [--cron-apply]")
 	}
+	args = normalizeCronArgs(args)
 	// positional client only as the first arg, so flags after it still parse
 	client := ""
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
@@ -49,14 +50,21 @@ func runInit(args []string, configPath string, out io.Writer) int {
 	clientFlag := fs.String("client", "", "agent to install capture hooks for")
 	processor := fs.String("processor", "", "AI provider that processes sessions")
 	notification := fs.Bool("notification", false, "desktop notification when background processing finishes")
+	cron := fs.String("cron", "", "schedule for background processing (cron expression, preset, or off)")
+	cronApply := fs.Bool("cron-apply", false, "scheduled runs apply proposals without review")
 	if err := fs.Parse(args); err != nil {
 		return 1
 	}
-	// --notification=false must differ from an omitted flag
-	notifSet := false
+	// set flags must differ from omitted ones (--notification=false vs nothing)
+	var notifSet, cronSet, cronApplySet bool
 	fs.Visit(func(f *flag.Flag) {
-		if f.Name == "notification" {
+		switch f.Name {
+		case "notification":
 			notifSet = true
+		case "cron":
+			cronSet = true
+		case "cron-apply":
+			cronApplySet = true
 		}
 	})
 	if fs.NArg() > 0 || (client != "" && *clientFlag != "") {
@@ -105,7 +113,28 @@ func runInit(args []string, configPath string, out io.Writer) int {
 		}
 		*notification, notifSet = v == "enabled", true
 	}
-	return saveInitConfig(*processor, *notification, notifSet, configPath, out)
+	if !cronSet && isTTY() {
+		spec, applySel, chosen, err := promptCron("")
+		if err != nil {
+			fmt.Fprintln(out, "aborted")
+			return 1
+		}
+		if chosen {
+			*cron, cronSet = spec, true
+			*cronApply, cronApplySet = applySel, true
+		}
+	}
+	if code := saveInitConfig(*processor, *notification, notifSet, configPath, out); code != 0 {
+		return code
+	}
+	if cronSet || cronApplySet {
+		spec := ""
+		if cronSet {
+			spec = *cron
+		}
+		return applyCronSetting(spec, *cronApply, cronApplySet, configPath, out)
+	}
+	return 0
 }
 
 // ensureGitignore adds .memoria/ to cwd's .gitignore (creating it if missing)
@@ -126,16 +155,19 @@ func ensureGitignore(out io.Writer) {
 // saveInitConfig persists every init choice in a single config write, then
 // runs the warn-only verifications. Nothing chosen → config untouched.
 func saveInitConfig(proc string, notifEnabled, notifSet bool, configPath string, out io.Writer) int {
-	if proc == "" {
-		fmt.Fprintln(out, "No processor configured — rerun with --processor <claude-code|codex|ollama|gemini> to set one.")
-		if !notifSet {
-			return 0
-		}
-	}
 	cfg, err := loadConfig(configPath)
 	if err != nil && !os.IsNotExist(err) {
 		fmt.Fprintln(out, "error:", err)
 		return 1
+	}
+	if proc == "" {
+		// hint only when nothing is configured yet — setup calls this too
+		if cfg.Processor == "" {
+			fmt.Fprintln(out, "No processor configured — rerun with --processor <claude-code|codex|ollama|gemini> to set one.")
+		}
+		if !notifSet {
+			return 0
+		}
 	}
 	if proc != "" {
 		cfg.Processor = proc

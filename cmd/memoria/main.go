@@ -18,6 +18,8 @@ func run(args []string, stdin io.Reader, out io.Writer) int {
 		return 0
 	case "init":
 		return runInit(args[1:], defaultConfigPath(), out)
+	case "setup":
+		return runSetup(args[1:], defaultConfigPath(), out)
 	case "bootstrap":
 		fs := flag.NewFlagSet("bootstrap", flag.ContinueOnError)
 		fs.SetOutput(out)

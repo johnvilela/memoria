@@ -255,7 +255,7 @@ func stubSpawn(t *testing.T, pid int) *[]string {
 	t.Helper()
 	var got []string
 	orig := spawnDetached
-	spawnDetached = func(dir string, args ...string) (int, error) {
+	spawnDetached = func(dir, logFile string, args ...string) (int, error) {
 		got = append([]string{dir}, args...)
 		return pid, nil
 	}
@@ -422,5 +422,149 @@ func TestInvokeGemini(t *testing.T) {
 	}
 	if _, err := invokeProcessor(config{}, "hi"); err == nil {
 		t.Fatal("no processor should error")
+	}
+}
+
+// sweepFixture registers one project per marker in a single config; non-empty
+// markers get an ended pending digest containing the marker text.
+func sweepFixture(t *testing.T, markers []string) (projs []string, cfgPath string) {
+	t.Helper()
+	for range markers {
+		projs = append(projs, t.TempDir())
+	}
+	cfgPath = testConfig(t, projs...)
+	for i, m := range markers {
+		if m == "" {
+			continue
+		}
+		d := digestFile(projs[i], "s1")
+		if err := os.MkdirAll(filepath.Dir(d), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(d, []byte("@user-prompt '"+m+"'\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := queueAdd(queuePath(cfgPath), filepath.Base(projs[i]), d); err != nil {
+			t.Fatal(err)
+		}
+		if err := queueMarkEnded(queuePath(cfgPath), filepath.Base(projs[i]), d); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return projs, cfgPath
+}
+
+// countingProcessor stubs invokeProcessor with a per-call response, recording
+// call count and prompts.
+func countingProcessor(t *testing.T, respond func(call int) (string, error)) (*int, *[]string) {
+	t.Helper()
+	calls := 0
+	var prompts []string
+	orig := invokeProcessor
+	invokeProcessor = func(cfg config, p string) (string, error) {
+		calls++
+		prompts = append(prompts, p)
+		return respond(calls)
+	}
+	t.Cleanup(func() { invokeProcessor = orig })
+	return &calls, &prompts
+}
+
+func TestProcessAllSweepsProjects(t *testing.T) {
+	projs, cfgPath := sweepFixture(t, []string{"alpha work", "beta work", ""})
+	calls, _ := countingProcessor(t, func(int) (string, error) { return goodProposalPages, nil })
+	var buf bytes.Buffer
+	// cwd is an unrelated dir — --all must not need a tracked project
+	if code := runProcess(t.TempDir(), cfgPath, []string{"--all"}, &buf); code != 0 {
+		t.Fatalf("process --all = %d: %s", code, buf.String())
+	}
+	for _, p := range projs[:2] {
+		if _, err := os.Stat(filepath.Join(p, ".memoria", "proposal.json")); err != nil {
+			t.Fatalf("proposal missing in %s: %v", p, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(projs[2], ".memoria", "proposal.json")); !os.IsNotExist(err) {
+		t.Fatal("proposal written for project without work")
+	}
+	if *calls != 2 {
+		t.Fatalf("processor invoked %d times, want 2", *calls)
+	}
+}
+
+func TestProcessAllApply(t *testing.T) {
+	projs, cfgPath := sweepFixture(t, []string{"alpha", "beta"})
+	countingProcessor(t, func(int) (string, error) { return goodProposalPages, nil })
+	var buf bytes.Buffer
+	if code := runProcess(t.TempDir(), cfgPath, []string{"--all", "--apply"}, &buf); code != 0 {
+		t.Fatalf("process --all --apply = %d: %s", code, buf.String())
+	}
+	for _, p := range projs {
+		if _, err := os.Stat(filepath.Join(p, "wiki", "concepts", "queue.md")); err != nil {
+			t.Fatalf("wiki not written in %s: %v", p, err)
+		}
+		if _, err := os.Stat(filepath.Join(p, ".memoria", "sessions", "processed", "s1.md")); err != nil {
+			t.Fatalf("digest not moved in %s: %v", p, err)
+		}
+		if _, err := os.Stat(filepath.Join(p, ".memoria", "proposal.json")); !os.IsNotExist(err) {
+			t.Fatalf("proposal not consumed in %s", p)
+		}
+	}
+	qb, _ := os.ReadFile(queuePath(cfgPath))
+	if strings.Contains(string(qb), "s1.md") {
+		t.Fatalf("queue entries not removed:\n%s", qb)
+	}
+}
+
+func TestProcessAllContinuesOnFailure(t *testing.T) {
+	projs, cfgPath := sweepFixture(t, []string{"alpha", "beta"})
+	countingProcessor(t, func(call int) (string, error) {
+		if call == 1 {
+			return "", fmt.Errorf("boom")
+		}
+		return goodProposalPages, nil
+	})
+	var buf bytes.Buffer
+	if code := runProcess(t.TempDir(), cfgPath, []string{"--all"}, &buf); code != 1 {
+		t.Fatalf("failure swallowed: %d %s", code, buf.String())
+	}
+	if _, err := os.Stat(filepath.Join(projs[1], ".memoria", "proposal.json")); err != nil {
+		t.Fatalf("second project not processed after first failed: %v", err)
+	}
+	st, _ := loadStatus(statusPath(cfgPath))
+	if st[filepath.Base(projs[0])].State != "error" {
+		t.Fatalf("failed project status = %+v, want error", st[filepath.Base(projs[0])])
+	}
+}
+
+func TestProcessAllNothingPending(t *testing.T) {
+	_, cfgPath := sweepFixture(t, []string{""})
+	stubProcessor(t, "", fmt.Errorf("must not be called"))
+	var buf bytes.Buffer
+	if code := runProcess(t.TempDir(), cfgPath, []string{"--all"}, &buf); code != 0 {
+		t.Fatalf("process --all = %d: %s", code, buf.String())
+	}
+	if !strings.Contains(buf.String(), "Nothing to process") {
+		t.Fatalf("missing message: %s", buf.String())
+	}
+}
+
+func TestProcessAllSkipsRunningProject(t *testing.T) {
+	projs, cfgPath := sweepFixture(t, []string{"alpha work", "beta work"})
+	if err := statusSet(statusPath(cfgPath), filepath.Base(projs[0]), "running", os.Getpid(), ""); err != nil {
+		t.Fatal(err)
+	}
+	calls, prompts := countingProcessor(t, func(int) (string, error) { return goodProposalPages, nil })
+	var buf bytes.Buffer
+	if code := runProcess(t.TempDir(), cfgPath, []string{"--all"}, &buf); code != 0 {
+		t.Fatalf("process --all = %d: %s", code, buf.String())
+	}
+	if *calls != 1 || strings.Contains((*prompts)[0], "alpha work") {
+		t.Fatalf("running project reached the processor: calls=%d", *calls)
+	}
+	if _, err := os.Stat(filepath.Join(projs[1], ".memoria", "proposal.json")); err != nil {
+		t.Fatalf("non-running project skipped: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(projs[0], ".memoria", "proposal.json")); !os.IsNotExist(err) {
+		t.Fatal("running project processed")
 	}
 }
