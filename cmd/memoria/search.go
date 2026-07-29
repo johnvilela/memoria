@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -10,11 +11,17 @@ import (
 
 // runSearch finds wiki pages by content substring, or by frontmatter tag when
 // the query starts with '#', then lets the user pick one to print. Human-only:
-// agents will get recall through a dedicated MCP later.
+// agents get the same search through the MCP memoria_search tool.
 func runSearch(cwd, configPath string, args []string, out io.Writer) int {
-	query := strings.TrimSpace(strings.Join(args, " "))
+	fs := flag.NewFlagSet("search", flag.ContinueOnError)
+	fs.SetOutput(out)
+	trash := fs.Bool("trash", false, "also search deleted pages under trash/")
+	if err := fs.Parse(args); err != nil {
+		return 1
+	}
+	query := strings.TrimSpace(strings.Join(fs.Args(), " "))
 	if query == "" {
-		fmt.Fprintln(out, "usage: memoria search <text | #tag>")
+		fmt.Fprintln(out, "usage: memoria search [--trash] <text | #tag>")
 		return 1
 	}
 	if !isTTY() {
@@ -36,7 +43,7 @@ func runSearch(cwd, configPath string, args []string, out io.Writer) int {
 	if wikiName == "" {
 		wikiName = "wiki"
 	}
-	wiki := readWiki(filepath.Join(proj, wikiName))
+	wiki := readWikiTrash(filepath.Join(proj, wikiName), *trash)
 	hits := searchWiki(wiki, query)
 	if len(hits) == 0 {
 		fmt.Fprintf(out, "No matches for %q\n", query)
@@ -54,6 +61,18 @@ func runSearch(cwd, configPath string, args []string, out io.Writer) int {
 	}
 	fmt.Fprint(out, wiki[choice])
 	return 0
+}
+
+// readWikiTrash is readWiki plus, on request, the trash/ subtree readWiki
+// deliberately hides — trashed pages come back keyed trash/<orig-path>.
+func readWikiTrash(root string, includeTrash bool) map[string]string {
+	wiki := readWiki(root)
+	if includeTrash {
+		for p, c := range readWiki(filepath.Join(root, "trash")) {
+			wiki["trash/"+p] = c
+		}
+	}
+	return wiki
 }
 
 // searchWiki returns the wiki-relative paths matching the query, sorted.

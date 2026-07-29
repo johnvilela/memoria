@@ -265,6 +265,17 @@ func installClientHooks(client string, out io.Writer, usage func()) int {
 		return 1
 	}
 	fmt.Fprintf(out, "Installed %d %s hooks in %s\n", len(events), label, settingsPath)
+	mcpPath := filepath.Join(home, ".claude.json")
+	installMCP := installMCPClaude
+	if client == "codex" {
+		mcpPath = filepath.Join(home, ".codex", "config.toml")
+		installMCP = installMCPCodex
+	}
+	if err := installMCP(mcpPath, bin); err != nil {
+		fmt.Fprintln(out, "error:", err)
+		return 1
+	}
+	fmt.Fprintf(out, "Registered memoria MCP server in %s\n", mcpPath)
 	fmt.Fprintf(out, "Tracked projects are read from %s — run memoria bootstrap inside a project to start capturing.\n", defaultConfigPath())
 	if note != "" {
 		fmt.Fprintln(out, note)

@@ -55,8 +55,8 @@ func stubProcessor(t *testing.T, response string, err error) *string {
 }
 
 const goodProposalPages = `{"pages":[
-	{"action":"update","path":"index.md","title":"Index","content":"# Index\n\n[[queue]]\n"},
-	{"action":"create","path":"concepts/queue.md","title":"Queue","content":"# Queue\n\nHow the queue works.\n"}
+	{"path":"index.md","title":"Index","tags":[],"body_markdown":"# Index\n\n[[concepts/queue]]\n"},
+	{"path":"concepts/queue.md","title":"Queue","tags":["queue","worker"],"body_markdown":"# Queue\n\nHow the queue works.\n"}
 ]}`
 
 func TestProcessWritesProposal(t *testing.T) {
@@ -130,11 +130,11 @@ func TestProcessSkipsUnendedSessions(t *testing.T) {
 
 func TestProcessRejectsBadPages(t *testing.T) {
 	for _, bad := range []string{
-		`{"pages":[{"action":"create","path":"../evil.md","title":"x","content":"y"}]}`,
-		`{"pages":[{"action":"create","path":"secrets/x.md","title":"x","content":"y"}]}`,
-		`{"pages":[{"action":"create","path":"concepts/x.txt","title":"x","content":"y"}]}`,
-		`{"pages":[{"action":"delete","path":"concepts/x.md","title":"x","content":"y"}]}`,
-		`{"pages":[{"action":"create","path":"concepts/x.md","title":"","content":""}]}`,
+		`{"pages":[{"path":"../evil.md","title":"x","body_markdown":"y"}]}`,
+		`{"pages":[{"path":"secrets/x.md","title":"x","body_markdown":"y"}]}`,
+		`{"pages":[{"path":"concepts/x.txt","title":"x","body_markdown":"y"}]}`,
+		`{"pages":[{"path":"trash/x.md","title":"x","body_markdown":"y"}]}`,
+		`{"pages":[{"path":"concepts/x.md","title":"","body_markdown":""}]}`,
 		`{"pages":[]}`,
 		`not json at all`,
 	} {
@@ -165,9 +165,15 @@ func TestProcessApply(t *testing.T) {
 	if err != nil || !strings.Contains(string(b), "How the queue works") {
 		t.Fatalf("wiki page not written: %v %q", err, b)
 	}
+	if !strings.HasPrefix(string(b), "---\ntags: [queue, worker]\n---\n\n") {
+		t.Fatalf("tags frontmatter not rendered: %q", b)
+	}
 	b, _ = os.ReadFile(filepath.Join(proj, "wiki", "index.md"))
-	if !strings.Contains(string(b), "[[queue]]") {
+	if !strings.Contains(string(b), "[[concepts/queue]]") {
 		t.Fatalf("index not updated: %q", b)
+	}
+	if strings.HasPrefix(string(b), "---") {
+		t.Fatalf("empty tags must not render frontmatter: %q", b)
 	}
 	if _, err := os.Stat(digest); !os.IsNotExist(err) {
 		t.Fatal("digest still in pending/")
@@ -188,7 +194,7 @@ func TestProcessApply(t *testing.T) {
 func TestProcessApplyRejectsTamperedProposal(t *testing.T) {
 	proj, cfgPath, digest := processFixture(t)
 	p := proposal{Project: filepath.Base(proj), Sessions: []string{digest},
-		Pages: []wikiPage{{Action: "create", Path: "../../evil.md", Title: "x", Content: "y"}}}
+		Pages: []wikiPage{{Path: "../../evil.md", Title: "x", BodyMarkdown: "y"}}}
 	b, _ := json.Marshal(p)
 	if err := os.WriteFile(filepath.Join(proj, ".memoria", "proposal.json"), b, 0o644); err != nil {
 		t.Fatal(err)
@@ -566,5 +572,46 @@ func TestProcessAllSkipsRunningProject(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(projs[0], ".memoria", "proposal.json")); !os.IsNotExist(err) {
 		t.Fatal("running project processed")
+	}
+}
+
+func TestRenderPage(t *testing.T) {
+	if got := renderPage([]string{"a", "b"}, "# T\n\nbody\n"); got != "---\ntags: [a, b]\n---\n\n# T\n\nbody\n" {
+		t.Fatalf("with tags: %q", got)
+	}
+	if got := renderPage(nil, "# T\n"); got != "# T\n" {
+		t.Fatalf("no tags: %q", got)
+	}
+}
+
+func TestValidPagePath(t *testing.T) {
+	for p, want := range map[string]bool{
+		"index.md":          true,
+		"concepts/x.md":     true,
+		"sessions/s1.md":    true,
+		"sessions/../x.md":  false,
+		"trash/x.md":        false,
+		"trash/concepts/x.md": false,
+	} {
+		if validPagePath(p) != want {
+			t.Fatalf("validPagePath(%q) = %v, want %v", p, !want, want)
+		}
+	}
+}
+
+func TestReadWikiSkipsTrash(t *testing.T) {
+	root := t.TempDir()
+	for _, p := range []string{"concepts/live.md", "trash/concepts/dead.md", "trash/gone.md"} {
+		dst := filepath.Join(root, filepath.FromSlash(p))
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(dst, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	wiki := readWiki(root)
+	if _, ok := wiki["concepts/live.md"]; !ok || len(wiki) != 1 {
+		t.Fatalf("readWiki = %v, want only concepts/live.md", wiki)
 	}
 }

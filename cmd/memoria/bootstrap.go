@@ -83,6 +83,9 @@ Curated long-term memory from past agent sessions lives in ` + "`%s/`" + `:
 decisions made, rules to follow, gotchas hit, concepts explained.
 Before non-trivial changes: read ` + "`%s/index.md`" + `, then grep ` + "`%s/`" + `
 for keywords. Pages carry YAML ` + "`tags:`" + ` frontmatter for topic lookup.
+Prefer the memoria MCP tools when available: memoria_search,
+memoria_digest, memoria_consolidate, memoria_lint, memoria_write_page,
+memoria_delete_page.
 <!-- memoria:end -->`
 
 // writeAgentsFiles puts the recall instructions into <proj>/AGENTS.md —

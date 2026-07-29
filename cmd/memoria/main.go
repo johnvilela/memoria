@@ -63,8 +63,17 @@ func run(args []string, stdin io.Reader, out io.Writer) int {
 			return 1
 		}
 		return runSearch(cwd, defaultConfigPath(), args[1:], out)
+	case "digest":
+		cwd, err := os.Getwd()
+		if err != nil {
+			fmt.Fprintln(out, "error:", err)
+			return 1
+		}
+		return runDigest(cwd, defaultConfigPath(), args[1:], out)
 	case "status":
 		return runStatus(defaultConfigPath(), out)
+	case "mcp":
+		return runMCP(defaultConfigPath(), out)
 	case "hook":
 		// must never block the agent: silent, always 0, nothing on stdout
 		if len(args) > 1 {

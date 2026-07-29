@@ -19,13 +19,6 @@ var seedOptions = []option{
 	{"yes", "Yes", "may take a while — runs in this terminal, don't close it"},
 }
 
-type seedPage struct {
-	Path         string   `json:"path"`
-	Title        string   `json:"title"`
-	BodyMarkdown string   `json:"body_markdown"`
-	Tags         []string `json:"tags"`
-}
-
 func hasCommits(dir string) bool {
 	return exec.Command("git", "-C", dir, "rev-parse", "--verify", "HEAD").Run() == nil
 }
@@ -146,13 +139,13 @@ func seedWiki(cfg config, dir, wikiRoot, configPath string, out io.Writer) (stri
 		return "", err
 	}
 	var pp struct {
-		Pages     []seedPage `json:"pages"`
+		Pages     []wikiPage `json:"pages"`
 		Rationale string     `json:"rationale"`
 	}
 	if err := json.Unmarshal([]byte(jsonStr), &pp); err != nil {
 		return "", fmt.Errorf("processor returned invalid JSON: %w", err)
 	}
-	if err := validateSeedPages(pp.Pages); err != nil {
+	if err := validatePages(pp.Pages); err != nil {
 		return "", err
 	}
 	for _, pg := range pp.Pages {
@@ -160,11 +153,7 @@ func seedWiki(cfg config, dir, wikiRoot, configPath string, out io.Writer) (stri
 		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 			return "", err
 		}
-		body := pg.BodyMarkdown
-		if len(pg.Tags) > 0 {
-			body = "---\ntags: [" + strings.Join(pg.Tags, ", ") + "]\n---\n\n" + body
-		}
-		if err := os.WriteFile(dst, []byte(body), 0o644); err != nil {
+		if err := os.WriteFile(dst, []byte(renderPage(pg.Tags, pg.BodyMarkdown)), 0o644); err != nil {
 			return "", err
 		}
 		fmt.Fprintf(out, "wrote %s\n", dst)
@@ -196,19 +185,3 @@ func buildSeedPrompt(rules, dir string) string {
 	return b.String()
 }
 
-// validateSeedPages is the trust boundary for seed output — same path rules
-// as process proposals; the prompt file carries the contract, Go enforces it.
-func validateSeedPages(pages []seedPage) error {
-	if len(pages) == 0 {
-		return fmt.Errorf("seed proposal has no pages")
-	}
-	for _, p := range pages {
-		if p.Title == "" || p.BodyMarkdown == "" {
-			return fmt.Errorf("page %q: empty title or body_markdown", p.Path)
-		}
-		if !validPagePath(p.Path) {
-			return fmt.Errorf("page path %q outside the wiki structure", p.Path)
-		}
-	}
-	return nil
-}

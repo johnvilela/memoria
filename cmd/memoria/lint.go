@@ -40,6 +40,15 @@ type lintFinding struct {
 	Pages    []string `json:"pages"`
 }
 
+// lintPage keeps the action/content shape of the lint fix contract — the
+// consolidation pipeline moved to wikiPage's body_markdown/tags shape.
+type lintPage struct {
+	Action  string `json:"action"`
+	Path    string `json:"path"`
+	Title   string `json:"title"`
+	Content string `json:"content"`
+}
+
 type lintDenied struct {
 	lintFinding
 	Reason string `json:"reason"`
@@ -241,7 +250,7 @@ func lintApply(cfg config, wikiRoot, lintPath string, out io.Writer) int {
 		return 1
 	}
 	var fix struct {
-		Pages []wikiPage `json:"pages"`
+		Pages []lintPage `json:"pages"`
 	}
 	if err := json.Unmarshal([]byte(jsonStr), &fix); err != nil {
 		fmt.Fprintln(out, "error: processor returned invalid JSON:", err)
@@ -338,7 +347,7 @@ func validateFindings(findings []lintFinding, wiki map[string]string) error {
 // validateLintFix reuses the wiki path rules and additionally confines
 // deletes to pages the findings name — the fix pass may not remove
 // unrelated wiki content.
-func validateLintFix(pages []wikiPage, findings []lintFinding) error {
+func validateLintFix(pages []lintPage, findings []lintFinding) error {
 	if len(pages) == 0 {
 		return fmt.Errorf("fix has no pages")
 	}

@@ -23,16 +23,27 @@ var defaultWikiPrompt string
 
 // appended by Go, never stored in the editable prompt file, so user edits
 // can't break parsing
-const jsonContract = `Output ONLY a JSON object, no code fences, no commentary:
-{"pages":[{"action":"create"|"update","path":"...","title":"...","content":"full markdown"}]}
-"path" is relative to the wiki root: "index.md" or under concepts/, decisions/, gotchas/ or rules/, always ending in .md.
-"content" is the complete markdown file body. Propose at least one page.`
+const jsonContract = `Output ONLY a ConsolidatedBatch JSON object, no code fences, no commentary:
+{"pages":[{"path":"...","title":"...","tags":["tag-1"],"body_markdown":"markdown body"}]}
+"path" is relative to the wiki root and encodes the kind: "index.md" or under concepts/, decisions/, gotchas/, rules/ or sessions/, always ending in .md.
+The episodic session page goes at "sessions/<session_id>.md" (session_id from the digest frontmatter).
+"body_markdown" is the page body without frontmatter — memoria writes the tags frontmatter itself.
+"tags" are 0-5 short kebab-case tags. 1-5 pages.`
 
 type wikiPage struct {
-	Action  string `json:"action"`
-	Path    string `json:"path"`
-	Title   string `json:"title"`
-	Content string `json:"content"`
+	Path         string   `json:"path"`
+	Title        string   `json:"title"`
+	BodyMarkdown string   `json:"body_markdown"`
+	Tags         []string `json:"tags"`
+}
+
+// renderPage prefixes the body with the tags frontmatter every wiki writer
+// (apply, seed, digest, MCP write) shares. No tags, no frontmatter.
+func renderPage(tags []string, body string) string {
+	if len(tags) == 0 {
+		return body
+	}
+	return "---\ntags: [" + strings.Join(tags, ", ") + "]\n---\n\n" + body
 }
 
 type proposal struct {
@@ -287,7 +298,7 @@ func generateProposal(cfg config, proj, wikiRoot, proposalPath, configPath, proj
 	}
 	fmt.Fprintf(out, "Proposal from %d session(s):\n", len(sessions))
 	for _, pg := range prop.Pages {
-		fmt.Fprintf(out, "  %-6s %s — %s\n", pg.Action, pg.Path, pg.Title)
+		fmt.Fprintf(out, "  %s — %s\n", pg.Path, pg.Title)
 	}
 	fmt.Fprintf(out, "Review %s then run: memoria process --apply\n", proposalPath)
 	done(fmt.Sprintf("proposal ready: %d pages from %d sessions — review and run memoria process --apply", len(prop.Pages), len(sessions)))
@@ -321,7 +332,7 @@ func applyProposal(proj, wikiRoot, proposalPath, qPath, projName string, out io.
 			fmt.Fprintln(out, "error:", err)
 			return 1
 		}
-		if err := os.WriteFile(dst, []byte(pg.Content), 0o644); err != nil {
+		if err := os.WriteFile(dst, []byte(renderPage(pg.Tags, pg.BodyMarkdown)), 0o644); err != nil {
 			fmt.Fprintln(out, "error:", err)
 			return 1
 		}
@@ -349,17 +360,14 @@ func applyProposal(proj, wikiRoot, proposalPath, qPath, projName string, out io.
 }
 
 // validatePages is the trust boundary for LLM output: only .md files inside
-// the four wiki categories (or index.md), no traversal, nothing empty.
+// the wiki categories (or index.md), no traversal, nothing empty.
 func validatePages(pages []wikiPage) error {
 	if len(pages) == 0 {
 		return fmt.Errorf("proposal has no pages")
 	}
 	for _, p := range pages {
-		if p.Action != "create" && p.Action != "update" {
-			return fmt.Errorf("page %q: invalid action %q", p.Path, p.Action)
-		}
-		if p.Title == "" || p.Content == "" {
-			return fmt.Errorf("page %q: empty title or content", p.Path)
+		if p.Title == "" || p.BodyMarkdown == "" {
+			return fmt.Errorf("page %q: empty title or body_markdown", p.Path)
 		}
 		if !validPagePath(p.Path) {
 			return fmt.Errorf("page path %q outside the wiki structure", p.Path)
@@ -376,7 +384,7 @@ func validPagePath(p string) bool {
 	if p == "index.md" {
 		return true
 	}
-	for _, c := range []string{"concepts/", "decisions/", "gotchas/", "rules/"} {
+	for _, c := range []string{"concepts/", "decisions/", "gotchas/", "rules/", "sessions/"} {
 		if strings.HasPrefix(p, c) {
 			return true
 		}
@@ -402,10 +410,22 @@ func loadPromptFile(configPath, name, def string) (string, error) {
 }
 
 // readWiki returns every .md file under root keyed by wiki-relative path.
+// trash/ is invisible everywhere — prompts, lint, search — unless a caller
+// reads it explicitly (search --trash).
 func readWiki(root string) map[string]string {
 	wiki := map[string]string{}
+	trash := filepath.Join(root, "trash")
 	_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() || !strings.HasSuffix(p, ".md") {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			if p == trash {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(p, ".md") {
 			return nil
 		}
 		if b, err := os.ReadFile(p); err == nil {
