@@ -77,8 +77,8 @@ func (m selectModel) View() string {
 }
 
 // selectOption runs an interactive single-choice select and returns the
-// chosen option's value.
-func selectOption(title string, opts []option) (string, error) {
+// chosen option's value. Var so tests can stub the picker.
+var selectOption = func(title string, opts []option) (string, error) {
 	res, err := tea.NewProgram(selectModel{title: title, opts: opts}).Run()
 	if err != nil {
 		return "", err

@@ -13,6 +13,23 @@ type agentCall struct {
 	args     []string
 }
 
+// stubSelect replaces the picker: captures the offered options and returns
+// the canned value (or an abort error when value is "ABORT").
+func stubSelect(t *testing.T, value string) *[]option {
+	t.Helper()
+	var seen []option
+	orig := selectOption
+	selectOption = func(title string, opts []option) (string, error) {
+		seen = opts
+		if value == "ABORT" {
+			return "", os.ErrClosed
+		}
+		return value, nil
+	}
+	t.Cleanup(func() { selectOption = orig })
+	return &seen
+}
+
 func stubAgent(t *testing.T, exit int) *agentCall {
 	t.Helper()
 	var call agentCall
@@ -160,7 +177,7 @@ func TestRunUsageNoBinary(t *testing.T) {
 func TestRunMutuallyExclusive(t *testing.T) {
 	proj, cfgPath := runFixture(t)
 	var buf bytes.Buffer
-	if code := runRun(proj, cfgPath, []string{"true", "--new", "--last-session"}, &buf); code != 1 {
+	if code := runRun(proj, cfgPath, []string{"true", "--new", "--session", "x"}, &buf); code != 1 {
 		t.Fatalf("exclusive flags = %d, want 1", code)
 	}
 	if !strings.Contains(buf.String(), "mutually exclusive") {
@@ -226,27 +243,65 @@ func TestRunDefaultNoSessionsFresh(t *testing.T) {
 	}
 }
 
-func TestRunDefaultDigestGoneFresh(t *testing.T) {
+func TestRunDefaultPickerContents(t *testing.T) {
 	proj, cfgPath := runFixture(t)
-	if err := os.Remove(filepath.Join(proj, ".memoria", "sessions", "pending", "bbb-222.md")); err != nil {
+	var index strings.Builder
+	for _, sid := range []string{"ccc-333", "ddd-444", "eee-555", "fff-666", "ggg-777"} {
+		index.WriteString("2026-07-29T10:00:00-03:00 - " + sid + " - work on " + sid + "\n")
+	}
+	f, err := os.OpenFile(filepath.Join(proj, ".memoria", "sessions.md"), os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
 		t.Fatal(err)
 	}
+	f.WriteString(index.String())
+	f.Close()
+	writeRunDigest(t, proj, "pending", "ggg-777.md", "")
 	stubTTY(t, true)
+	seen := stubSelect(t, "")
+	stubAgent(t, 0)
+	var buf bytes.Buffer
+	if code := runRun(proj, cfgPath, []string{"true"}, &buf); code != 0 {
+		t.Fatalf("run = %d: %s", code, buf.String())
+	}
+	opts := *seen
+	if len(opts) != 6 {
+		t.Fatalf("options = %d, want 6 (new + 5)", len(opts))
+	}
+	if opts[0].value != "" || opts[0].label != "New session" {
+		t.Fatalf("first option = %+v, want New session", opts[0])
+	}
+	if opts[1].value != "ggg-777" || opts[5].value != "ccc-333" {
+		t.Fatalf("order = %q..%q, want newest first ggg-777..ccc-333", opts[1].value, opts[5].value)
+	}
+	if strings.Contains(opts[1].desc, "no digest") {
+		t.Fatalf("ggg-777 has a digest, desc = %q", opts[1].desc)
+	}
+	if !strings.Contains(opts[2].desc, "no digest") {
+		t.Fatalf("fff-666 has no digest, desc = %q", opts[2].desc)
+	}
+}
+
+func TestRunDefaultPickerNew(t *testing.T) {
+	proj, cfgPath := runFixture(t)
+	stubTTY(t, true)
+	stubSelect(t, "")
 	call := stubAgent(t, 0)
 	var buf bytes.Buffer
 	if code := runRun(proj, cfgPath, []string{"true"}, &buf); code != 0 {
 		t.Fatalf("run = %d: %s", code, buf.String())
 	}
 	if len(call.args) != 0 {
-		t.Fatalf("args = %v, want fresh without asking", call.args)
+		t.Fatalf("args = %v, want fresh", call.args)
 	}
 }
 
-func TestRunLastSessionHandoff(t *testing.T) {
+func TestRunDefaultPickerHandoff(t *testing.T) {
 	proj, cfgPath := runFixture(t)
+	stubTTY(t, true)
+	stubSelect(t, "bbb-222")
 	call := stubAgent(t, 0)
 	var buf bytes.Buffer
-	if code := runRun(proj, cfgPath, []string{"true", "--last-session"}, &buf); code != 0 {
+	if code := runRun(proj, cfgPath, []string{"true"}, &buf); code != 0 {
 		t.Fatalf("run = %d: %s", code, buf.String())
 	}
 	if len(call.args) != 1 || !strings.Contains(call.args[0], filepath.Join("pending", "bbb-222.md")) {
@@ -254,12 +309,14 @@ func TestRunLastSessionHandoff(t *testing.T) {
 	}
 }
 
-func TestRunLastSessionNativeResume(t *testing.T) {
+func TestRunDefaultPickerNativeResume(t *testing.T) {
 	proj, cfgPath := runFixture(t)
 	writeRunDigest(t, proj, "pending", "bbb-222.md", "claude-code")
+	stubTTY(t, true)
+	stubSelect(t, "bbb-222")
 	call := stubAgent(t, 0)
 	var buf bytes.Buffer
-	if code := runRun(proj, cfgPath, []string{"/usr/bin/claude", "--last-session"}, &buf); code != 0 {
+	if code := runRun(proj, cfgPath, []string{"/usr/bin/claude"}, &buf); code != 0 {
 		t.Fatalf("run = %d: %s", code, buf.String())
 	}
 	if len(call.args) != 2 || call.args[0] != "--resume" || call.args[1] != "bbb-222" {
@@ -267,23 +324,41 @@ func TestRunLastSessionNativeResume(t *testing.T) {
 	}
 }
 
-func TestRunLastSessionNoSessions(t *testing.T) {
-	proj := t.TempDir()
-	cfgPath := testConfig(t, proj)
+func TestRunDefaultPickerAbort(t *testing.T) {
+	proj, cfgPath := runFixture(t)
+	stubTTY(t, true)
+	stubSelect(t, "ABORT")
+	call := stubAgent(t, 0)
 	var buf bytes.Buffer
-	if code := runRun(proj, cfgPath, []string{"true", "--last-session"}, &buf); code != 1 {
-		t.Fatalf("run = %d, want 1", code)
+	if code := runRun(proj, cfgPath, []string{"true"}, &buf); code != 0 {
+		t.Fatalf("abort = %d, want 0", code)
 	}
-	if !strings.Contains(buf.String(), "no sessions recorded") {
-		t.Fatalf("output = %q", buf.String())
+	if call.bin != "" {
+		t.Fatalf("agent launched on abort: %+v", call)
 	}
 }
 
-func TestRunLastSessionDigestMissing(t *testing.T) {
+func TestRunDigestlessNativeResume(t *testing.T) {
 	proj, cfgPath := runFixture(t)
-	os.Remove(filepath.Join(proj, ".memoria", "sessions", "pending", "bbb-222.md"))
+	stubTTY(t, true)
+	stubSelect(t, "aaa-111") // no digest in fixture
+	call := stubAgent(t, 0)
 	var buf bytes.Buffer
-	if code := runRun(proj, cfgPath, []string{"true", "--last-session"}, &buf); code != 1 {
+	if code := runRun(proj, cfgPath, []string{"/usr/bin/claude"}, &buf); code != 0 {
+		t.Fatalf("run = %d: %s", code, buf.String())
+	}
+	if len(call.args) != 2 || call.args[0] != "--resume" || call.args[1] != "aaa-111" {
+		t.Fatalf("digest-less resume args = %v", call.args)
+	}
+}
+
+func TestRunDigestlessUnknownBin(t *testing.T) {
+	proj, cfgPath := runFixture(t)
+	stubTTY(t, true)
+	stubSelect(t, "aaa-111")
+	stubAgent(t, 0)
+	var buf bytes.Buffer
+	if code := runRun(proj, cfgPath, []string{"true"}, &buf); code != 1 {
 		t.Fatalf("run = %d, want 1", code)
 	}
 	if !strings.Contains(buf.String(), "no digest") {

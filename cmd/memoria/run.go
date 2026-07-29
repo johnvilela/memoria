@@ -11,11 +11,6 @@ import (
 	"strings"
 )
 
-var runOptions = []option{
-	{value: "no", label: "No", desc: "start a fresh session"},
-	{value: "yes", label: "Yes", desc: "hand the last session over to the agent"},
-}
-
 type sessionEntry struct{ date, sid, name string }
 
 // readSessions parses <proj>/.memoria/sessions.md ("RFC3339 - SID - NAME"
@@ -89,6 +84,18 @@ func matchSessions(entries []sessionEntry, q string) []sessionEntry {
 	return hits
 }
 
+// binClient maps an agent binary to the client name its harness records,
+// for resuming sessions whose digest (and client: line) never got written.
+func binClient(bin string) string {
+	switch filepath.Base(bin) {
+	case "claude":
+		return "claude-code"
+	case "codex":
+		return "codex"
+	}
+	return ""
+}
+
 // nativeResume returns the agent's own resume argv when the launched binary
 // is the same harness that recorded the session, else nil (digest handoff).
 func nativeResume(bin, client, sid string) []string {
@@ -128,7 +135,7 @@ var runAgent = func(dir, bin string, args ...string) (int, error) {
 // previous session natively (same harness) or via a digest-pointer prompt.
 func runRun(cwd, configPath string, args []string, out io.Writer) int {
 	usage := func() int {
-		fmt.Fprintln(out, "usage: memoria run <agent-binary> [--new | --session <id|name> | --last-session]")
+		fmt.Fprintln(out, "usage: memoria run <agent-binary> [--new | --session <id|name>]")
 		return 1
 	}
 	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
@@ -139,18 +146,11 @@ func runRun(cwd, configPath string, args []string, out io.Writer) int {
 	fs.SetOutput(out)
 	newSess := fs.Bool("new", false, "start a fresh session")
 	session := fs.String("session", "", "continue a specific session (id prefix or name substring)")
-	last := fs.Bool("last-session", false, "continue the most recent session")
 	if err := fs.Parse(args[1:]); err != nil {
 		return 1
 	}
-	set := 0
-	for _, on := range []bool{*newSess, *session != "", *last} {
-		if on {
-			set++
-		}
-	}
-	if set > 1 {
-		fmt.Fprintln(out, "error: --new, --session and --last-session are mutually exclusive")
+	if *newSess && *session != "" {
+		fmt.Fprintln(out, "error: --new and --session are mutually exclusive")
 		return 1
 	}
 	cfg, err := loadConfig(configPath)
@@ -172,12 +172,6 @@ func runRun(cwd, configPath string, args []string, out io.Writer) int {
 	var chosen *sessionEntry
 	switch {
 	case *newSess:
-	case *last:
-		if len(entries) == 0 {
-			fmt.Fprintln(out, "error: no sessions recorded")
-			return 1
-		}
-		chosen = &entries[len(entries)-1]
 	case *session != "":
 		hits := matchSessions(entries, *session)
 		switch {
@@ -206,13 +200,28 @@ func runRun(cwd, configPath string, args []string, out io.Writer) int {
 			}
 		}
 	default:
-		// no flags: offer the last session, fall back to fresh on any gap
+		// no flags: pick from the last 5 sessions, fresh on non-TTY or empty
 		if isTTY() && len(entries) > 0 {
-			e := entries[len(entries)-1]
-			if findDigest(proj, e.sid) != "" {
-				v, err := selectOption(fmt.Sprintf("Continue from where the last session stopped? (%s)", e.name), runOptions)
-				if err == nil && v == "yes" {
-					chosen = &e
+			n := min(5, len(entries))
+			recent := entries[len(entries)-n:]
+			opts := []option{{value: "", label: "New session", desc: "start fresh"}}
+			for i := n - 1; i >= 0; i-- { // newest first
+				e := recent[i]
+				desc := e.date + " " + e.sid
+				if findDigest(proj, e.sid) == "" {
+					desc += " — no digest, resume may be slow"
+				}
+				opts = append(opts, option{value: e.sid, label: e.name, desc: desc})
+			}
+			sid, err := selectOption("Continue a previous session?", opts)
+			if err != nil {
+				return 0 // esc: exit without launching the agent
+			}
+			if sid != "" {
+				for i := range entries {
+					if entries[i].sid == sid {
+						chosen = &entries[i]
+					}
 				}
 			}
 		}
@@ -222,10 +231,12 @@ func runRun(cwd, configPath string, args []string, out io.Writer) int {
 	if chosen != nil {
 		digest := findDigest(proj, chosen.sid)
 		if digest == "" {
-			fmt.Fprintf(out, "error: no digest found for session %s\n", chosen.sid)
-			return 1
-		}
-		if agentArgs = nativeResume(bin, digestClient(digest), chosen.sid); agentArgs == nil {
+			// no digest: native resume is the only way back in
+			if agentArgs = nativeResume(bin, binClient(bin), chosen.sid); agentArgs == nil {
+				fmt.Fprintf(out, "error: no digest for session %s and %s cannot natively resume it\n", chosen.sid, bin)
+				return 1
+			}
+		} else if agentArgs = nativeResume(bin, digestClient(digest), chosen.sid); agentArgs == nil {
 			agentArgs = []string{handoffPrompt(digest)}
 		}
 	}
