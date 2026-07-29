@@ -343,3 +343,33 @@ func TestLintPromptEditable(t *testing.T) {
 		t.Fatal("user-edited lint prompt not respected")
 	}
 }
+
+func TestLintAutoAppliesFixes(t *testing.T) {
+	proj, cfgPath := lintFixture(t)
+	setAutoApply(t, cfgPath)
+	fix := `{"pages":[{"action":"update","path":"concepts/queue.md","title":"Queue","content":"# Queue\n\nresolved: channels\n"}]}`
+	calls, _ := countingProcessor(t, func(call int) (string, error) {
+		if call == 1 {
+			return goodLintFindings, nil
+		}
+		return fix, nil
+	})
+	var buf bytes.Buffer
+	if code := runLint(proj, cfgPath, []string{"--foreground"}, &buf); code != 0 {
+		t.Fatalf("lint = %d: %s", code, buf.String())
+	}
+	if *calls != 2 {
+		t.Fatalf("processor calls = %d, want 2 (report + fix)", *calls)
+	}
+	b, err := os.ReadFile(filepath.Join(proj, "wiki", "concepts", "queue.md"))
+	if err != nil || !strings.Contains(string(b), "resolved: channels") {
+		t.Fatalf("fix not applied: %v %q", err, b)
+	}
+	if _, err := os.Stat(lintReportPath(proj)); !os.IsNotExist(err) {
+		t.Fatal("report not consumed")
+	}
+	st, _ := loadStatus(statusPath(cfgPath))
+	if !strings.Contains(st[filepath.Base(proj)].Detail, "applied") {
+		t.Fatalf("status = %+v, want applied detail", st[filepath.Base(proj)])
+	}
+}

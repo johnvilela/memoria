@@ -615,3 +615,52 @@ func TestReadWikiSkipsTrash(t *testing.T) {
 		t.Fatalf("readWiki = %v, want only concepts/live.md", wiki)
 	}
 }
+
+func setAutoApply(t *testing.T, cfgPath string) {
+	t.Helper()
+	cfg, err := loadConfig(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.AutoApply = true
+	if err := saveConfig(cfgPath, cfg); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestProcessForegroundAutoApplies(t *testing.T) {
+	proj, cfgPath, digest := processFixture(t)
+	setAutoApply(t, cfgPath)
+	stubProcessor(t, goodProposalPages, nil)
+	var buf bytes.Buffer
+	if code := runProcess(proj, cfgPath, []string{"--foreground"}, &buf); code != 0 {
+		t.Fatalf("process = %d: %s", code, buf.String())
+	}
+	b, err := os.ReadFile(filepath.Join(proj, "wiki", "concepts", "queue.md"))
+	if err != nil || !strings.Contains(string(b), "How the queue works") {
+		t.Fatalf("page not auto-applied: %v %q", err, b)
+	}
+	if _, err := os.Stat(filepath.Join(proj, ".memoria", "proposal.json")); !os.IsNotExist(err) {
+		t.Fatal("proposal left behind despite auto_apply")
+	}
+	if _, err := os.Stat(digest); !os.IsNotExist(err) {
+		t.Fatal("digest not archived")
+	}
+	st, _ := loadStatus(statusPath(cfgPath))
+	if !strings.Contains(st[filepath.Base(proj)].Detail, "applied") {
+		t.Fatalf("status = %+v, want applied detail", st[filepath.Base(proj)])
+	}
+}
+
+func TestProcessAllAutoApplyNoDouble(t *testing.T) {
+	projs, cfgPath := sweepFixture(t, []string{"alpha work"})
+	setAutoApply(t, cfgPath)
+	countingProcessor(t, func(int) (string, error) { return goodProposalPages, nil })
+	var buf bytes.Buffer
+	if code := runProcess(t.TempDir(), cfgPath, []string{"--all", "--apply"}, &buf); code != 0 {
+		t.Fatalf("process --all --apply = %d: %s", code, buf.String())
+	}
+	if _, err := os.Stat(filepath.Join(projs[0], "wiki", "concepts", "queue.md")); err != nil {
+		t.Fatalf("page not written: %v", err)
+	}
+}

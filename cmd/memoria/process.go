@@ -121,7 +121,7 @@ func runProcess(cwd, configPath string, args []string, out io.Writer) int {
 		return applyProposal(proj, wikiRoot, proposalPath, queuePath(configPath), p.Name, out)
 	}
 	if !*foreground {
-		return detachProcess(cwd, configPath, p.Name, out)
+		return detachProcess(cfg, cwd, configPath, p.Name, out)
 	}
 	return generateProposal(cfg, proj, wikiRoot, proposalPath, configPath, p.Name, out)
 }
@@ -129,7 +129,7 @@ func runProcess(cwd, configPath string, args []string, out io.Writer) int {
 // detachProcess hands the slow part (invoking the LLM) to a detached child
 // running `process --foreground`, so the terminal and any active agent stay
 // free. Progress is tracked in status.yaml (see memoria status).
-func detachProcess(cwd, configPath, projName string, out io.Writer) int {
+func detachProcess(cfg config, cwd, configPath, projName string, out io.Writer) int {
 	sessions, _, err := collectEnded(queuePath(configPath), projName)
 	if err != nil {
 		fmt.Fprintln(out, "error:", err)
@@ -154,7 +154,11 @@ func detachProcess(cwd, configPath, projName string, out io.Writer) int {
 	}
 	logf("process", "%s: detached pid %d for %d sessions", projName, pid, len(sessions))
 	fmt.Fprintf(out, "Processing %d session(s) in background (pid %d).\n", len(sessions), pid)
-	fmt.Fprintln(out, "Follow with: memoria process --inspect — the proposal lands at .memoria/proposal.json")
+	if cfg.AutoApply {
+		fmt.Fprintln(out, "Follow with: memoria process --inspect — pages will be applied automatically")
+	} else {
+		fmt.Fprintln(out, "Follow with: memoria process --inspect — the proposal lands at .memoria/proposal.json")
+	}
 	return 0
 }
 
@@ -194,7 +198,9 @@ func processAll(cfg config, configPath string, apply bool, out io.Writer) int {
 			failed++
 			continue
 		}
-		if apply {
+		// with auto_apply generateProposal already applied — a second apply
+		// would fail on the consumed proposal
+		if apply && !cfg.AutoApply {
 			if code := applyProposal(root, wikiRoot, proposalPath, queuePath(configPath), p.Name, out); code != 0 {
 				failed++
 			}
@@ -299,6 +305,15 @@ func generateProposal(cfg config, proj, wikiRoot, proposalPath, configPath, proj
 	fmt.Fprintf(out, "Proposal from %d session(s):\n", len(sessions))
 	for _, pg := range prop.Pages {
 		fmt.Fprintf(out, "  %s — %s\n", pg.Path, pg.Title)
+	}
+	if cfg.AutoApply {
+		if code := applyProposal(proj, wikiRoot, proposalPath, queuePath(configPath), projName, out); code != 0 {
+			return fail(fmt.Errorf("auto-apply failed — proposal kept at %s", proposalPath))
+		}
+		done(fmt.Sprintf("applied %d pages from %d sessions", len(prop.Pages), len(sessions)))
+		notify(cfg, "memoria", fmt.Sprintf("Applied %d wiki page(s) for %s", len(prop.Pages), projName))
+		logf("process", "%s: auto-applied %d pages from %d sessions", projName, len(prop.Pages), len(sessions))
+		return 0
 	}
 	fmt.Fprintf(out, "Review %s then run: memoria process --apply\n", proposalPath)
 	done(fmt.Sprintf("proposal ready: %d pages from %d sessions — review and run memoria process --apply", len(prop.Pages), len(sessions)))

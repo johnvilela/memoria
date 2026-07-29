@@ -35,9 +35,14 @@ var notificationOptions = []option{
 	{"enabled", "Enabled", "notify-send when the proposal is ready or processing fails"},
 }
 
+var autoApplyOptions = []option{
+	{"disabled", "Disabled", "default — review proposals and lint fixes yourself"},
+	{"enabled", "Enabled", "session end consolidates and writes the wiki automatically, lint auto-fixes"},
+}
+
 func runInit(args []string, configPath string, out io.Writer) int {
 	usage := func() {
-		fmt.Fprintln(out, "usage: memoria init [<client>] [--client claude-code|codex] [--processor claude-code|codex|ollama|gemini] [--notification] [--cron [<expr|preset|off>]] [--cron-apply]")
+		fmt.Fprintln(out, "usage: memoria init [<client>] [--client claude-code|codex] [--processor claude-code|codex|ollama|gemini] [--notification] [--auto-apply] [--cron [<expr|preset|off>]] [--cron-apply]")
 	}
 	args = normalizeCronArgs(args)
 	// positional client only as the first arg, so flags after it still parse
@@ -50,17 +55,20 @@ func runInit(args []string, configPath string, out io.Writer) int {
 	clientFlag := fs.String("client", "", "agent to install capture hooks for")
 	processor := fs.String("processor", "", "AI provider that processes sessions")
 	notification := fs.Bool("notification", false, "desktop notification when background processing finishes")
+	autoApply := fs.Bool("auto-apply", false, "autopilot: session end consolidates and applies without review")
 	cron := fs.String("cron", "", "schedule for background processing (cron expression, preset, or off)")
 	cronApply := fs.Bool("cron-apply", false, "scheduled runs apply proposals without review")
 	if err := fs.Parse(args); err != nil {
 		return 1
 	}
 	// set flags must differ from omitted ones (--notification=false vs nothing)
-	var notifSet, cronSet, cronApplySet bool
+	var notifSet, autoSet, cronSet, cronApplySet bool
 	fs.Visit(func(f *flag.Flag) {
 		switch f.Name {
 		case "notification":
 			notifSet = true
+		case "auto-apply":
+			autoSet = true
 		case "cron":
 			cronSet = true
 		case "cron-apply":
@@ -113,6 +121,14 @@ func runInit(args []string, configPath string, out io.Writer) int {
 		}
 		*notification, notifSet = v == "enabled", true
 	}
+	if !autoSet && isTTY() {
+		v, err := selectOption("Auto-apply: consolidate and write the wiki on session end, without review?", autoApplyOptions)
+		if err != nil {
+			fmt.Fprintln(out, "aborted")
+			return 1
+		}
+		*autoApply, autoSet = v == "enabled", true
+	}
 	if !cronSet && isTTY() {
 		spec, applySel, chosen, err := promptCron("")
 		if err != nil {
@@ -124,7 +140,7 @@ func runInit(args []string, configPath string, out io.Writer) int {
 			*cronApply, cronApplySet = applySel, true
 		}
 	}
-	if code := saveInitConfig(*processor, *notification, notifSet, configPath, out); code != 0 {
+	if code := saveInitConfig(*processor, *notification, notifSet, *autoApply, autoSet, configPath, out); code != 0 {
 		return code
 	}
 	if cronSet || cronApplySet {
@@ -154,7 +170,7 @@ func ensureGitignore(out io.Writer) {
 
 // saveInitConfig persists every init choice in a single config write, then
 // runs the warn-only verifications. Nothing chosen → config untouched.
-func saveInitConfig(proc string, notifEnabled, notifSet bool, configPath string, out io.Writer) int {
+func saveInitConfig(proc string, notifEnabled, notifSet, autoEnabled, autoSet bool, configPath string, out io.Writer) int {
 	cfg, err := loadConfig(configPath)
 	if err != nil && !os.IsNotExist(err) {
 		fmt.Fprintln(out, "error:", err)
@@ -165,7 +181,7 @@ func saveInitConfig(proc string, notifEnabled, notifSet bool, configPath string,
 		if cfg.Processor == "" {
 			fmt.Fprintln(out, "No processor configured — rerun with --processor <claude-code|codex|ollama|gemini> to set one.")
 		}
-		if !notifSet {
+		if !notifSet && !autoSet {
 			return 0
 		}
 	}
@@ -191,6 +207,9 @@ func saveInitConfig(proc string, notifEnabled, notifSet bool, configPath string,
 	}
 	if notifSet {
 		cfg.Notifications = notifEnabled
+	}
+	if autoSet {
+		cfg.AutoApply = autoEnabled
 	}
 	if err := saveConfig(configPath, cfg); err != nil {
 		fmt.Fprintln(out, "error:", err)
@@ -222,6 +241,13 @@ func saveInitConfig(proc string, notifEnabled, notifSet bool, configPath string,
 				fmt.Fprintln(out, "warning: notify-send not found on PATH")
 			}
 		}
+	}
+	if autoSet {
+		state := "disabled"
+		if autoEnabled {
+			state = "enabled"
+		}
+		fmt.Fprintf(out, "Auto-apply %s in %s\n", state, configPath)
 	}
 	return 0
 }

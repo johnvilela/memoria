@@ -198,6 +198,15 @@ func generateLintReport(cfg config, configPath, wikiRoot, lintPath, deniedPath, 
 		return fail(err)
 	}
 	fmt.Fprintf(out, "Lint report with %d finding(s): %s\n", len(rep.Findings), lintPath)
+	if cfg.AutoApply {
+		if code := lintApply(cfg, wikiRoot, lintPath, out); code != 0 {
+			// report stays on disk for manual lint --review / --apply
+			return fail(fmt.Errorf("lint auto-fix failed — report kept for review"))
+		}
+		done(fmt.Sprintf("lint: applied fixes for %d finding(s)", len(rep.Findings)))
+		notify(cfg, "memoria", fmt.Sprintf("Lint fixed %d finding(s) for %s", len(rep.Findings), projName))
+		return 0
+	}
 	printFindings(out, rep.Findings)
 	fmt.Fprintln(out, "Review with: memoria lint --review — resolve with: memoria lint --apply — reject with: memoria lint --deny \"why\"")
 	done(fmt.Sprintf("lint report ready: %d finding(s) — review with memoria lint --review", len(rep.Findings)))

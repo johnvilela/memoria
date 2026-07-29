@@ -370,3 +370,18 @@ func TestSearchCLITrashFlag(t *testing.T) {
 		t.Fatalf("content not printed: %s", buf.String())
 	}
 }
+
+func TestMCPConsolidateAutoApplied(t *testing.T) {
+	proj, cfgPath := mcpFixture(t)
+	spawned := stubSpawn(t, 4242)
+	if err := statusSet(statusPath(cfgPath), filepath.Base(proj), "done", 0, "applied 2 pages from 1 sessions"); err != nil {
+		t.Fatal(err)
+	}
+	res, err := mcpConsolidate(proj, cfgPath, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.State != "done" || !strings.Contains(res.Detail, "applied") || len(*spawned) != 0 {
+		t.Fatalf("res = %+v, spawned = %v", res, *spawned)
+	}
+}

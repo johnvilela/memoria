@@ -11,23 +11,26 @@ import (
 // Hooks stay init-only.
 func runSetup(args []string, configPath string, out io.Writer) int {
 	usage := func() {
-		fmt.Fprintln(out, "usage: memoria setup [--processor claude-code|codex|ollama|gemini] [--notification] [--cron <expr|preset|off>] [--cron-apply]")
+		fmt.Fprintln(out, "usage: memoria setup [--processor claude-code|codex|ollama|gemini] [--notification] [--auto-apply] [--cron <expr|preset|off>] [--cron-apply]")
 	}
 	args = normalizeCronArgs(args)
 	fs := flag.NewFlagSet("setup", flag.ContinueOnError)
 	fs.SetOutput(out)
 	processor := fs.String("processor", "", "AI provider that processes sessions")
 	notification := fs.Bool("notification", false, "desktop notification when background processing finishes")
+	autoApply := fs.Bool("auto-apply", false, "autopilot: session end consolidates and applies without review")
 	cron := fs.String("cron", "", "schedule for background processing (cron expression, preset, or off)")
 	cronApply := fs.Bool("cron-apply", false, "scheduled runs apply proposals without review")
 	if err := fs.Parse(args); err != nil {
 		return 1
 	}
-	var notifSet, cronSet, cronApplySet bool
+	var notifSet, autoSet, cronSet, cronApplySet bool
 	fs.Visit(func(f *flag.Flag) {
 		switch f.Name {
 		case "notification":
 			notifSet = true
+		case "auto-apply":
+			autoSet = true
 		case "cron":
 			cronSet = true
 		case "cron-apply":
@@ -55,7 +58,7 @@ func runSetup(args []string, configPath string, out io.Writer) int {
 	}
 
 	// any flag given = change exactly that, keep the rest — no prompts
-	anySet := *processor != "" || notifSet || cronSet || cronApplySet
+	anySet := *processor != "" || notifSet || autoSet || cronSet || cronApplySet
 	if !anySet {
 		if !isTTY() {
 			usage()
@@ -90,6 +93,20 @@ func runSetup(args []string, configPath string, out io.Writer) int {
 				*notification, notifSet = v == "enabled", true
 			}
 		}
+		if !autoSet {
+			cur := "disabled"
+			if cfg.AutoApply {
+				cur = "enabled"
+			}
+			opts := append([]option{{"keep", "Keep current (" + cur + ")", ""}}, autoApplyOptions...)
+			v, err := selectOption("Auto-apply: consolidate and write the wiki on session end, without review?", opts)
+			if err != nil {
+				return aborted()
+			}
+			if v != "keep" {
+				*autoApply, autoSet = v == "enabled", true
+			}
+		}
 		if !cronSet {
 			cur := cfg.Cron
 			if cur == "" {
@@ -106,8 +123,8 @@ func runSetup(args []string, configPath string, out io.Writer) int {
 		}
 	}
 
-	if *processor != "" || notifSet {
-		if code := saveInitConfig(*processor, *notification, notifSet, configPath, out); code != 0 {
+	if *processor != "" || notifSet || autoSet {
+		if code := saveInitConfig(*processor, *notification, notifSet, *autoApply, autoSet, configPath, out); code != 0 {
 			return code
 		}
 	}

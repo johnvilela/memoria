@@ -168,17 +168,22 @@ func mcpConsolidate(cwd, configPath string, apply bool) (mcpJobOut, error) {
 		}
 		return mcpJobOut{State: "done", Detail: "proposal applied", Pages: pages}, nil
 	}
-	ready := func(procStatus) (mcpJobOut, bool) {
+	ready := func(s procStatus) (mcpJobOut, bool) {
 		pages, err := proposalPages(proposalPath)
-		if err != nil {
-			return mcpJobOut{}, false
+		if err == nil {
+			return mcpJobOut{State: "done", Pages: pages,
+				Detail: "proposal ready — review the pages, then call again with apply=true"}, true
 		}
-		return mcpJobOut{State: "done", Pages: pages,
-			Detail: "proposal ready — review the pages, then call again with apply=true"}, true
+		// auto_apply runs consume the proposal themselves
+		if s.State == "done" && strings.HasPrefix(s.Detail, "applied") {
+			return mcpJobOut{State: "done", Detail: s.Detail}, true
+		}
+		return mcpJobOut{}, false
 	}
 	// nothing pending and no proposal waiting → spawning would loop forever
 	if sessions, _, err := collectEnded(queuePath(configPath), projName); err == nil && len(sessions) == 0 {
-		if r, ok := ready(procStatus{}); ok {
+		st, _ := loadStatus(statusPath(configPath))
+		if r, ok := ready(st[projName]); ok {
 			return r, nil
 		}
 		return mcpJobOut{State: "idle", Detail: "no ended sessions to consolidate"}, nil

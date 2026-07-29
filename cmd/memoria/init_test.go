@@ -298,3 +298,25 @@ func TestInitSkipsGitignoreOutsideGitRepo(t *testing.T) {
 		t.Fatal(".gitignore created outside a git repo")
 	}
 }
+
+func TestInitAutoApplyFlag(t *testing.T) {
+	_, cfgPath := initEnv(t)
+	if code, out := runInitCmd(t, "claude-code", "--processor", "ollama", "--auto-apply"); code != 0 {
+		t.Fatalf("init = %d: %s", code, out)
+	}
+	cfg, err := loadConfig(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.AutoApply {
+		t.Fatal("auto_apply not saved")
+	}
+
+	_, cfgPath = initEnv(t)
+	if code, out := runInitCmd(t, "claude-code", "--processor", "ollama"); code != 0 {
+		t.Fatalf("init = %d: %s", code, out)
+	}
+	if cfg, _ := loadConfig(cfgPath); cfg.AutoApply {
+		t.Fatal("auto_apply enabled without the flag")
+	}
+}

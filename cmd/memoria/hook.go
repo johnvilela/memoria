@@ -179,7 +179,34 @@ func captureHook(name string, hookArgs []string, stdin io.Reader, configPath str
 			return err
 		}
 	}
-	return appendDigest(proj, projName, sid, name, client, payload, queuePath(configPath))
+	if err := appendDigest(proj, projName, sid, name, client, payload, queuePath(configPath)); err != nil {
+		return err
+	}
+	if name == "session-end" && cfg.AutoApply {
+		autoConsolidate(configPath, proj, projName)
+	}
+	return nil
+}
+
+// autoConsolidate is the auto_apply trigger: session end spawns a detached
+// consolidation run (which also writes the sessions/ page and auto-applies).
+// Best-effort — a hook must never block or fail the agent, so everything is
+// logf-only. Busy project slot = skip; the next session end or cron sweeps it.
+func autoConsolidate(configPath, proj, projName string) {
+	sPath := statusPath(configPath)
+	if st, _ := loadStatus(sPath); st[projName].State == "running" && pidAlive(st[projName].PID) {
+		logf("hook", "%s: auto-consolidate skipped, job running (pid %d)", projName, st[projName].PID)
+		return
+	}
+	pid, err := spawnDetached(proj, runLogPath(configPath, projName), "process", "--foreground")
+	if err != nil {
+		logf("hook", "%s: auto-consolidate spawn: %v", projName, err)
+		return
+	}
+	if err := statusSet(sPath, projName, "running", pid, ""); err != nil {
+		logf("hook", "%s: status: %v", projName, err)
+	}
+	logf("hook", "%s: auto-consolidate spawned pid %d", projName, pid)
 }
 
 // incarnationName returns the digest file name of the nth incarnation of a

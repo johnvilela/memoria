@@ -131,3 +131,33 @@ func TestSetupCronSmoke(t *testing.T) {
 		t.Fatalf("cron = %q", cfg.Cron)
 	}
 }
+
+func TestSetupAutoApply(t *testing.T) {
+	_, cfgPath := initEnv(t)
+	if code, out := runInitCmd(t, "claude-code", "--processor", "ollama"); code != 0 {
+		t.Fatalf("init = %d: %s", code, out)
+	}
+	var buf bytes.Buffer
+	if code := runSetup([]string{"--auto-apply"}, cfgPath, &buf); code != 0 {
+		t.Fatalf("setup = %d: %s", code, buf.String())
+	}
+	cfg, _ := loadConfig(cfgPath)
+	if !cfg.AutoApply {
+		t.Fatal("auto_apply not saved by setup")
+	}
+	// unrelated flag keeps it
+	buf.Reset()
+	if code := runSetup([]string{"--processor", "ollama"}, cfgPath, &buf); code != 0 {
+		t.Fatalf("setup = %d: %s", code, buf.String())
+	}
+	if cfg, _ := loadConfig(cfgPath); !cfg.AutoApply {
+		t.Fatal("auto_apply lost on unrelated setup")
+	}
+	// and it can be turned off again
+	if code := runSetup([]string{"--auto-apply=false"}, cfgPath, &buf); code != 0 {
+		t.Fatalf("setup off = %d: %s", code, buf.String())
+	}
+	if cfg, _ := loadConfig(cfgPath); cfg.AutoApply {
+		t.Fatal("auto_apply not disabled")
+	}
+}

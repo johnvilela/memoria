@@ -418,3 +418,49 @@ func TestCaptureHookNoClientNoLine(t *testing.T) {
 		t.Fatalf("client line written without --client: %q", got)
 	}
 }
+
+func TestHookSessionEndSpawnsConsolidation(t *testing.T) {
+	proj := t.TempDir()
+	cfg := testConfig(t, proj)
+	setAutoApply(t, cfg)
+	spawned := stubSpawn(t, 4242)
+	if err := captureHook("session-end", nil, payload("s1", proj), cfg); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{proj, "process", "--foreground"}
+	if strings.Join(*spawned, " ") != strings.Join(want, " ") {
+		t.Fatalf("spawned %v, want %v", *spawned, want)
+	}
+	st, _ := loadStatus(statusPath(cfg))
+	if st[filepath.Base(proj)].State != "running" || st[filepath.Base(proj)].PID != 4242 {
+		t.Fatalf("status = %+v", st[filepath.Base(proj)])
+	}
+}
+
+func TestHookSessionEndNoAutoApplyNoSpawn(t *testing.T) {
+	proj := t.TempDir()
+	cfg := testConfig(t, proj)
+	spawned := stubSpawn(t, 4242)
+	if err := captureHook("session-end", nil, payload("s1", proj), cfg); err != nil {
+		t.Fatal(err)
+	}
+	if len(*spawned) != 0 {
+		t.Fatalf("spawned %v without auto_apply", *spawned)
+	}
+}
+
+func TestHookSessionEndBusyNoSpawn(t *testing.T) {
+	proj := t.TempDir()
+	cfg := testConfig(t, proj)
+	setAutoApply(t, cfg)
+	if err := statusSet(statusPath(cfg), filepath.Base(proj), "running", os.Getpid(), ""); err != nil {
+		t.Fatal(err)
+	}
+	spawned := stubSpawn(t, 4242)
+	if err := captureHook("session-end", nil, payload("s1", proj), cfg); err != nil {
+		t.Fatal(err)
+	}
+	if len(*spawned) != 0 {
+		t.Fatalf("spawned %v while busy", *spawned)
+	}
+}
