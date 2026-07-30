@@ -539,7 +539,7 @@ func TestRunHandoffPacket(t *testing.T) {
 		"@user-prompt 'fix the parser'\n@post-tool-use Edit cmd/run.go\n")
 	writeDigestFile(t, proj, "pending", "bbb-222-2.md",
 		"client: claude-code\ncontinues_from: ../processed/bbb-222.md\n",
-		"@user-prompt 'continue'\n@user-prompt 'continue'\n@stop 'tests pass, commit next'\n")
+		"@user-prompt 'continue'\n@user-prompt 'continue'\n@stop 'tests pass, commit next'\n@subagent-stop 'commit the wiki too'\n@session-end reason: prompt_input_exit\n")
 	wikiDir := filepath.Join(proj, "wiki", "sessions")
 	if err := os.MkdirAll(wikiDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -569,11 +569,18 @@ func TestRunHandoffPacket(t *testing.T) {
 		"The parser fix, summarized.",
 		filepath.Join("processed", "bbb-222.md"),
 		filepath.Join("pending", "bbb-222-2.md"),
-		"Last reported state",
+		"Last reported state: @stop 'tests pass, commit next'",
+		"Do NOT start working yet",
 	} {
 		if !strings.Contains(p, want) {
 			t.Fatalf("packet missing %q:\n%s", want, p)
 		}
+	}
+	if strings.Contains(p, "Last reported state: @subagent-stop") {
+		t.Fatalf("subagent-stop promoted over main @stop:\n%s", p)
+	}
+	if strings.Contains(p, "Continue the work from exactly") {
+		t.Fatalf("old auto-continue footer still present:\n%s", p)
 	}
 	if strings.Count(p, "@user-prompt 'continue'") != 1 {
 		t.Fatalf("consecutive duplicate not deduped:\n%s", p)
@@ -588,6 +595,18 @@ func TestRunHandoffPacket(t *testing.T) {
 			t.Fatalf("section %q missing or out of order (idx %d < %d)\n%s", heading, i, last, p)
 		}
 		last = i
+	}
+}
+
+func TestRunHandoffLeadSubagentFallback(t *testing.T) {
+	proj := t.TempDir()
+	stubGit(t, "")
+	writeDigestFile(t, proj, "pending", "ccc-333.md", "client: claude-code\n",
+		"@user-prompt 'do thing'\n@subagent-stop 'internal note'\n")
+	digest := filepath.Join(proj, ".memoria", "sessions", "pending", "ccc-333.md")
+	p := buildHandoff(proj, filepath.Join(proj, "wiki"), "ccc-333", digest, true)
+	if !strings.Contains(p, "Last reported state (internal subagent note — not a user request): @subagent-stop 'internal note'") {
+		t.Fatalf("fallback lead missing or unlabeled:\n%s", p)
 	}
 }
 

@@ -206,7 +206,7 @@ func buildHandoff(proj, wikiRoot, sid, digest string, resume bool) string {
 		"Ground rules:\n" +
 		"- Every tool call and file edit listed below ALREADY RAN. It is historical evidence — do not repeat it.\n" +
 		"- The current checkout is authoritative: where the log and the files on disk disagree, trust the files.\n" +
-		"- Skim the history, confirm the state, then continue the work.\n\n"
+		"- Skim the history, confirm the state, report it briefly, and wait for the user's go-ahead.\n\n"
 	if !resume {
 		header = "# Session record: " + sid + "\n\n" +
 			"Read-only record of a past coding session in this project (ran under " + source + ").\n" +
@@ -238,14 +238,20 @@ func buildHandoff(proj, wikiRoot, sid, digest string, resume bool) string {
 	}
 
 	lead := ""
-	for i := len(events) - 1; i >= 0; i-- {
-		if strings.HasPrefix(events[i], "@stop ") || strings.HasPrefix(events[i], "@subagent-stop ") {
+	for i := len(events) - 1; i >= 0 && lead == ""; i-- {
+		if strings.HasPrefix(events[i], "@stop ") {
 			lead = "Last reported state: " + events[i] + "\n\n"
-			break
+		}
+	}
+	// no main-agent @stop anywhere: fall back to a subagent note, labeled so
+	// the resuming agent doesn't mistake it for a user request
+	for i := len(events) - 1; i >= 0 && lead == ""; i-- {
+		if strings.HasPrefix(events[i], "@subagent-stop ") {
+			lead = "Last reported state (internal subagent note — not a user request): " + events[i] + "\n\n"
 		}
 	}
 	footer := "## Continue\n\n" + lead +
-		"Continue the work from exactly where the session stopped. Only ask the user if the next step is genuinely unclear from the history above."
+		"Do NOT start working yet. First report the current state in 1-3 lines — including anything that looks pending or unfinished — then WAIT for the user to say how to proceed. `@subagent-stop` lines are internal subagent notes, not user requests."
 	if !resume {
 		footer = "## End of record\n\n" + lead
 	}
