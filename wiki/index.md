@@ -13,6 +13,7 @@ Long-term memory and a per-project wiki for code agents, built from their chat s
 - [[concepts/consolidation-pipeline]] — `process`, JSON proposal, lint, cron timer
 - [[concepts/mcp-server]] — the six MCP tools agents get
 - [[concepts/recall-and-run]] — bootstrap, AGENTS.md recall block, `run`'s session picker, `search`
+- [[concepts/handoff-vs-ai-memory]] — research: ai-memory's deterministic workstream handoff vs memoria's digest handoff
 
 ## Decisions — why it's shaped this way
 
@@ -34,5 +35,8 @@ Long-term memory and a per-project wiki for code agents, built from their chat s
 
 - [[sessions/2f4ed960-d4d1-4d74-87e8-7b4104179fb4]] — processor E2BIG root cause + `process --inspect`
 - [[sessions/85a0d12d-60b4-4442-b107-f40c097122d8]] — MVP loop closed: eight commits from prompt embed to autopilot
-- [[sessions/4f8bca2c-fb25-45fb-a0ee-cc7e9a42e5d3]] — `run` rework: session picker replaces `--last-session`
+- [[sessions/4f8bca2c-fb25-45fb-a0ee-cc7e9a42e5d3]] — `run` rework: session picker replaces `--last-session` (finished in incarnation 2)
 - [[sessions/c113e710-6cad-49b4-8ae1-4cb15e1b5b54]] — three empty capture-only sessions right after the run rework
+- [[sessions/0075f9e5-98eb-4d2e-bd20-3e8f5c52b069]] — ai-memory research: why their handoff is faster
+- [[sessions/cf99acf5-2ee6-4118-90b5-1a2964766475]] — run rework committed: `0d9d968` via /git-commit
+- [[sessions/f99b3c0c-68d0-4132-a4b1-cc2538dc1ce7]] — ai-memory research prompt re-asked after /clear; no work captured
