@@ -271,7 +271,7 @@ func generateProposal(cfg config, proj, wikiRoot, proposalPath, configPath, proj
 	}
 	prompt := buildPrompt(rules, readWiki(wikiRoot), digests)
 	fmt.Fprintf(out, "Invoking %s with %d session(s) — this can take a few minutes...\n", cfg.Processor, len(sessions))
-	raw, err := invokeProcessor(cfg, prompt)
+	raw, err := invokeProcessor(cfg, proj, prompt)
 	if err != nil {
 		return fail(err)
 	}

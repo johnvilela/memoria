@@ -157,7 +157,7 @@ func generateLintReport(cfg config, configPath, wikiRoot, lintPath, deniedPath, 
 	if err != nil {
 		return fail(err)
 	}
-	raw, err := invokeProcessor(cfg, buildLintPrompt(rules, wiki, readDenied(deniedPath)))
+	raw, err := invokeProcessor(cfg, filepath.Dir(wikiRoot), buildLintPrompt(rules, wiki, readDenied(deniedPath)))
 	if err != nil {
 		return fail(err)
 	}
@@ -248,7 +248,7 @@ func lintApply(cfg config, wikiRoot, lintPath string, out io.Writer) int {
 		return 0
 	}
 
-	raw, err := invokeProcessor(cfg, buildLintFixPrompt(findings, wiki))
+	raw, err := invokeProcessor(cfg, filepath.Dir(wikiRoot), buildLintFixPrompt(findings, wiki))
 	if err != nil {
 		fmt.Fprintln(out, "error:", err)
 		return 1

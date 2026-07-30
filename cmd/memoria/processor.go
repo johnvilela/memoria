@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -19,13 +20,31 @@ const processorTimeout = 10 * time.Minute
 var geminiGenerateURL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
 
 // invokeProcessor sends the prompt to the configured processor and returns
-// its raw text output. Var so tests can stub the whole call.
-var invokeProcessor = func(cfg config, prompt string) (string, error) {
+// its raw text output. dir is the project dir — codex runs there when it's a
+// git repo (codex trusts git repos natively). Var so tests can stub the whole
+// call.
+var invokeProcessor = func(cfg config, dir, prompt string) (string, error) {
 	switch cfg.Processor {
 	case "claude-code":
-		return runProcessorCmd("claude", []string{"-p"}, prompt)
+		model := cfg.ProcessorModel
+		if model == "" {
+			model = "haiku" // wiki work is text digestion — cheap model suffices
+		}
+		return runProcessorCmd("claude", []string{"-p", "--model", model}, os.TempDir(), prompt)
 	case "codex":
-		return runProcessorCmd("codex", []string{"exec", "-"}, prompt)
+		model := cfg.ProcessorModel
+		if model == "" {
+			model = "gpt-5.4.mini"
+		}
+		effort := cfg.ProcessorEffort
+		if effort == "" {
+			effort = "high"
+		}
+		args := []string{"exec", "-m", model, "-c", "model_reasoning_effort=" + effort}
+		if hasGitDir(dir) {
+			return runProcessorCmd("codex", append(args, "-"), dir, prompt)
+		}
+		return runProcessorCmd("codex", append(args, "--skip-git-repo-check", "-"), os.TempDir(), prompt)
 	case "gemini":
 		return invokeGemini(cfg, prompt)
 	case "ollama":
@@ -37,16 +56,26 @@ var invokeProcessor = func(cfg config, prompt string) (string, error) {
 	}
 }
 
+// hasGitDir reports whether dir contains a .git entry (dir or file — file for
+// worktrees/submodules). Such dirs are trusted by codex without extra flags.
+func hasGitDir(dir string) bool {
+	if dir == "" {
+		return false
+	}
+	_, err := os.Stat(filepath.Join(dir, ".git"))
+	return err == nil
+}
+
 // runProcessorCmd executes an AI CLI with the prompt on stdin — argv has a
 // ~128KiB per-arg kernel limit (E2BIG) that wiki+digest prompts easily blow.
-// cwd = temp dir and MEMORIA_NO_CAPTURE keep the nested agent session out of
-// memoria.
-func runProcessorCmd(bin string, args []string, prompt string) (string, error) {
+// MEMORIA_NO_CAPTURE keeps the nested agent session out of memoria; claude
+// additionally runs in a temp dir as belt-and-braces.
+func runProcessorCmd(bin string, args []string, dir, prompt string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), processorTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, bin, args...)
 	cmd.Stdin = strings.NewReader(prompt)
-	cmd.Dir = os.TempDir()
+	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "MEMORIA_NO_CAPTURE=1")
 	var stderr strings.Builder
 	cmd.Stderr = &stderr

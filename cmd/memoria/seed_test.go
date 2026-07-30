@@ -29,7 +29,7 @@ func seedConfig(t *testing.T, cfg config) string {
 func fatalProcessor(t *testing.T) {
 	t.Helper()
 	orig := invokeProcessor
-	invokeProcessor = func(cfg config, prompt string) (string, error) {
+	invokeProcessor = func(cfg config, dir, prompt string) (string, error) {
 		t.Error("processor must not be invoked")
 		return "", fmt.Errorf("must not be called")
 	}

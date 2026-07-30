@@ -109,7 +109,7 @@ func digestForeground(cfg config, proj, wikiRoot, configPath, projName, sid stri
 
 	prompt := buildDigestPrompt(rules, string(current), string(obs))
 	fmt.Fprintf(out, "Invoking %s for session %s — this can take a few minutes...\n", cfg.Processor, sid)
-	raw, err := invokeProcessor(cfg, prompt)
+	raw, err := invokeProcessor(cfg, proj, prompt)
 	if err != nil {
 		return fail(err)
 	}

@@ -46,7 +46,7 @@ func stubProcessor(t *testing.T, response string, err error) *string {
 	t.Helper()
 	var prompt string
 	orig := invokeProcessor
-	invokeProcessor = func(cfg config, p string) (string, error) {
+	invokeProcessor = func(cfg config, dir, p string) (string, error) {
 		prompt = p
 		return response, err
 	}
@@ -416,17 +416,17 @@ func TestInvokeGemini(t *testing.T) {
 	defer func() { geminiGenerateURL = orig }()
 	t.Setenv("GEMINI_API_KEY", "")
 
-	out, err := invokeProcessor(config{Processor: "gemini", GeminiAPIKey: "k123"}, "hi")
+	out, err := invokeProcessor(config{Processor: "gemini", GeminiAPIKey: "k123"}, "", "hi")
 	if err != nil || out != `{"pages":[]}` {
 		t.Fatalf("gemini = %q, %v", out, err)
 	}
-	if _, err := invokeProcessor(config{Processor: "gemini", GeminiAPIKey: "bad"}, "hi"); err == nil {
+	if _, err := invokeProcessor(config{Processor: "gemini", GeminiAPIKey: "bad"}, "", "hi"); err == nil {
 		t.Fatal("bad key should error")
 	}
-	if _, err := invokeProcessor(config{Processor: "ollama"}, "hi"); err == nil || !strings.Contains(err.Error(), "coming soon") {
+	if _, err := invokeProcessor(config{Processor: "ollama"}, "", "hi"); err == nil || !strings.Contains(err.Error(), "coming soon") {
 		t.Fatalf("ollama placeholder: %v", err)
 	}
-	if _, err := invokeProcessor(config{}, "hi"); err == nil {
+	if _, err := invokeProcessor(config{}, "", "hi"); err == nil {
 		t.Fatal("no processor should error")
 	}
 }
@@ -467,7 +467,7 @@ func countingProcessor(t *testing.T, respond func(call int) (string, error)) (*i
 	calls := 0
 	var prompts []string
 	orig := invokeProcessor
-	invokeProcessor = func(cfg config, p string) (string, error) {
+	invokeProcessor = func(cfg config, dir, p string) (string, error) {
 		calls++
 		prompts = append(prompts, p)
 		return respond(calls)

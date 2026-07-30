@@ -134,7 +134,7 @@ func seedWiki(cfg config, dir, wikiRoot, configPath string, out io.Writer) (stri
 	if err != nil {
 		return "", err
 	}
-	raw, err := invokeProcessor(cfg, buildSeedPrompt(rules, dir))
+	raw, err := invokeProcessor(cfg, dir, buildSeedPrompt(rules, dir))
 	if err != nil {
 		return "", err
 	}
