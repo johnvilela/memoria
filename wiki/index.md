@@ -2,8 +2,6 @@
 tags: [index]
 ---
 
-# memoria
-
 Long-term memory and a per-project wiki for code agents, built from their chat sessions. Start with [[concepts/architecture-overview]] for the pipeline end to end.
 
 ## Concepts — how it works
@@ -16,6 +14,9 @@ Long-term memory and a per-project wiki for code agents, built from their chat s
 - [[concepts/recall-and-run]] — bootstrap, AGENTS.md recall block, `run`'s session picker + cross-harness handoff packet (ask-first since `6414c80`), `search`
 - [[concepts/multirepo-parent-project]] — how memoria behaves on a multirepo parent folder; the eparts verdict — adaptations shipped as `31b7251`
 - [[concepts/handoff-vs-ai-memory]] — research: ai-memory's deterministic workstream handoff vs memoria's — spawned the packet handoff (`ad5d206`)
+- [[concepts/processor-directory-trust]] — per-provider cwd handling for the CLI processors (codex, claude); git-trust fix `dc9c30f`
+- [[concepts/processor-models-and-effort]] — configurable model/effort for cheaper wiki work (haiku/gpt-5.4.mini by default)
+- [[concepts/wiki-auto-commit]] — applied wiki changes are versioned automatically when inside a git repo
 - [[research/ai-memory-workstream-comparison]] — external (chatgpt) deep-dive on ai-memory v1.19.2 that fed the `run` rework
 
 ## Decisions — why it's shaped this way
@@ -25,6 +26,7 @@ Long-term memory and a per-project wiki for code agents, built from their chat s
 - [[decisions/0003-never-block-the-agent]] — LLM-driven work runs detached
 - [[decisions/0004-embedded-prompts-with-file-override]] — prompts ship in the binary (`cmd/memoria/prompts/`), a config file overrides
 - [[decisions/0005-auto-apply-is-opt-in]] — autopilot off by default
+- [[decisions/0006-wiki-auto-commit-on-apply]] — applied wiki changes auto-commit when inside a git repo
 
 ## Gotchas — what bit us
 
@@ -35,6 +37,7 @@ Long-term memory and a per-project wiki for code agents, built from their chat s
 - [[gotchas/module-path-mismatch-breaks-go-install]] — fix `go.mod` path before tagging a release
 - [[gotchas/auto-apply-rewrites-wiki-mid-session]] — background auto-apply consolidation can modify `wiki/` while a session is running
 - [[gotchas/subagent-stop-promoted-to-user-request]] — handoff auto-ran a subagent's internal note; ask-first since `6414c80`
+- [[gotchas/codex-refuses-untrusted-directories]] — codex exec refuses to run outside git repos or trusted paths; fixed in `dc9c30f`
 
 ## Sessions — the episodic log
 
@@ -55,3 +58,4 @@ Long-term memory and a per-project wiki for code agents, built from their chat s
 - [[sessions/67c500e5-dc86-4a64-8e79-a76444932b79]] — `memoria_recall` shipped (`d6edeea`): read-only "what did we do?" answers, digest rerouted
 - [[sessions/019fb0d1-0ea2-71c3-a0c2-616d5973374c]] — deferred wiki commit lands as `4d9171a` over a fourth packet handoff; recall question answered write-free
 - [[sessions/e112664f-9954-4d8e-8fd2-a11e13d66bc0]] — handoff made ask-first (`6414c80`); multirepo assessment for eparts, adaptations committed as `31b7251` in incarnation 2
+- [[sessions/c133e40b-8547-4a99-bc98-d14b7029ccfe]] — codex git-trust fix, processor model config, wiki auto-commit — `dc9c30f` + `f0bf53a`
