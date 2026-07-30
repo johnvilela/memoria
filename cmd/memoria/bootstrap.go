@@ -53,9 +53,15 @@ func runBootstrap(cwd, configPath, wikiName string, background, seedForeground b
 		return 1
 	}
 
-	if err := addGitignoreEntry(cwd); err != nil {
-		fmt.Fprintln(out, "error:", err)
-		return 1
+	if _, err := os.Stat(filepath.Join(cwd, ".git")); err == nil {
+		if err := addGitignoreEntry(cwd); err != nil {
+			fmt.Fprintln(out, "error:", err)
+			return 1
+		}
+	} else {
+		// multirepo parent (or plain folder): still fully supported, but
+		// the wiki lives outside version control — say so once
+		fmt.Fprintln(out, "warning: "+cwd+" is not a git repository — the wiki will not be versioned")
 	}
 	if err := os.MkdirAll(wikiPath, 0o755); err != nil {
 		fmt.Fprintln(out, "error:", err)

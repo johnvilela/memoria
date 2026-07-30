@@ -598,6 +598,45 @@ func TestRunHandoffPacket(t *testing.T) {
 	}
 }
 
+func TestRunHandoffMultirepoCheckpoint(t *testing.T) {
+	proj := t.TempDir() // parent is NOT a repo; two child repos
+	for _, svc := range []string{"svc-a", "svc-b"} {
+		if err := os.MkdirAll(filepath.Join(proj, svc, ".git"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	orig := gitCheckpoint
+	gitCheckpoint = func(dir string) string {
+		switch dir {
+		case filepath.Join(proj, "svc-a"):
+			return "HEAD: aaa svc-a work"
+		case filepath.Join(proj, "svc-b"):
+			return "HEAD: bbb svc-b work"
+		}
+		return "" // parent root: not a repo
+	}
+	t.Cleanup(func() { gitCheckpoint = orig })
+	writeDigestFile(t, proj, "pending", "ddd-444.md", "client: claude-code\n",
+		"@user-prompt 'fix both services'\n"+
+			"@post-tool-use Write "+filepath.Join(proj, "svc-a", "main.go")+"\n"+
+			"@post-tool-use Bash 'go test ./...'\n"+
+			"@post-tool-use Edit "+filepath.Join(proj, "svc-b", "api.go")+" error: 'oops'\n"+
+			"@stop 'done'\n")
+	digest := filepath.Join(proj, ".memoria", "sessions", "pending", "ddd-444.md")
+	p := buildHandoff(proj, filepath.Join(proj, "wiki"), "ddd-444", digest, true)
+	if !strings.Contains(p, "per touched repo") {
+		t.Fatalf("multirepo checkpoint section missing:\n%s", p)
+	}
+	for _, want := range []string{"### svc-a", "HEAD: aaa svc-a work", "### svc-b", "HEAD: bbb svc-b work"} {
+		if !strings.Contains(p, want) {
+			t.Fatalf("packet missing %q:\n%s", want, p)
+		}
+	}
+	if strings.Index(p, "### svc-b") > strings.Index(p, "### svc-a") {
+		t.Fatalf("newest-touched repo must come first:\n%s", p)
+	}
+}
+
 func TestRunHandoffLeadSubagentFallback(t *testing.T) {
 	proj := t.TempDir()
 	stubGit(t, "")

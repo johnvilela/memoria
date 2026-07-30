@@ -28,7 +28,11 @@ func hasCommits(dir string) bool {
 // detached with --background (implies yes, works without a TTY). Foreground
 // is best-effort — a refusal or failure never fails bootstrap.
 func maybeSeedWiki(cfg config, p project, configPath string, background bool, out io.Writer) int {
-	if cfg.Processor == "" || !hasCommits(p.Path) {
+	if cfg.Processor == "" {
+		return 0
+	}
+	if !hasCommits(p.Path) {
+		fmt.Fprintln(out, "note: no git history in "+p.Path+" — skipping wiki seed")
 		return 0
 	}
 	if background {

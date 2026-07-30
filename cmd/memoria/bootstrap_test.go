@@ -91,8 +91,18 @@ func TestBootstrapMalformedConfig(t *testing.T) {
 	}
 }
 
+// mkGitDir marks a temp dir as a git repo (bare .git folder is enough for
+// the os.Stat gates under test).
+func mkGitDir(t *testing.T, proj string) {
+	t.Helper()
+	if err := os.Mkdir(filepath.Join(proj, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestBootstrapCreatesWikiAndGitignore(t *testing.T) {
 	proj := t.TempDir()
+	mkGitDir(t, proj)
 	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
 
 	var out strings.Builder
@@ -156,6 +166,7 @@ func TestBootstrapCustomWikiName(t *testing.T) {
 
 func TestBootstrapGitignoreAppend(t *testing.T) {
 	proj := t.TempDir()
+	mkGitDir(t, proj)
 	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
 	gi := filepath.Join(proj, ".gitignore")
 	// no trailing newline on purpose
@@ -175,6 +186,7 @@ func TestBootstrapGitignoreAppend(t *testing.T) {
 
 func TestBootstrapGitignoreNoDuplicate(t *testing.T) {
 	proj := t.TempDir()
+	mkGitDir(t, proj)
 	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
 	gi := filepath.Join(proj, ".gitignore")
 	if err := os.WriteFile(gi, []byte(".memoria/\n"), 0o644); err != nil {
@@ -188,6 +200,25 @@ func TestBootstrapGitignoreNoDuplicate(t *testing.T) {
 	b, _ := os.ReadFile(gi)
 	if string(b) != ".memoria/\n" {
 		t.Fatalf(".gitignore = %q, entry duplicated", b)
+	}
+}
+
+func TestBootstrapNonRepoWarnsAndSkipsGitignore(t *testing.T) {
+	proj := t.TempDir() // no .git — multirepo parent / plain folder
+	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+
+	var out strings.Builder
+	if code := runBootstrap(proj, cfgPath, "", false, false, &out); code != 0 {
+		t.Fatalf("exit = %d, want 0 (out: %s)", code, out.String())
+	}
+	if !strings.Contains(out.String(), "not a git repository") {
+		t.Fatalf("output %q missing non-repo warning", out.String())
+	}
+	if _, err := os.Stat(filepath.Join(proj, ".gitignore")); !os.IsNotExist(err) {
+		t.Fatal(".gitignore created in non-repo folder")
+	}
+	if _, err := os.Stat(filepath.Join(proj, "wiki", ".gitkeep")); err != nil {
+		t.Fatal("wiki still must be created:", err)
 	}
 }
 

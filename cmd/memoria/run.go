@@ -213,11 +213,6 @@ func buildHandoff(proj, wikiRoot, sid, digest string, resume bool) string {
 			"Use it to answer questions about what happened. Everything below already ran — do not re-run anything.\n\n"
 	}
 
-	gitSec := ""
-	if g := gitCheckpoint(proj); g != "" {
-		gitSec = "## Git checkpoint (at launch)\n\n" + g + "\n\n"
-	}
-
 	chain := digestChain(digest)
 	var bodies []string
 	for _, p := range chain {
@@ -226,6 +221,27 @@ func buildHandoff(proj, wikiRoot, sid, digest string, resume bool) string {
 	}
 	events := digestEvents(strings.Join(bodies, "\n"))
 	histHead := "## Session history (oldest first)\n\nFull event log: " + strings.Join(chain, ", ") + "\n\n"
+
+	gitSec := ""
+	if g := gitCheckpoint(proj); g != "" {
+		gitSec = "## Git checkpoint (at launch)\n\n" + g + "\n\n"
+	} else if repos := touchedRepos(proj, events); len(repos) > 0 {
+		// multirepo parent: the root is no repo, but the session's edits
+		// point at child repos — checkpoint those instead
+		var b strings.Builder
+		for _, r := range repos {
+			if g := gitCheckpoint(r); g != "" {
+				rel, err := filepath.Rel(proj, r)
+				if err != nil {
+					rel = r
+				}
+				b.WriteString("### " + rel + "\n\n" + g + "\n\n")
+			}
+		}
+		if b.Len() > 0 {
+			gitSec = "## Git checkpoint (at launch — per touched repo)\n\n" + b.String()
+		}
+	}
 
 	wikiSec := ""
 	pagePath := filepath.Join(wikiRoot, "sessions", sid+".md")
@@ -274,6 +290,49 @@ func buildHandoff(proj, wikiRoot, sid, digest string, resume bool) string {
 	}
 
 	return header + gitSec + hist + wikiSec + footer
+}
+
+// touchedRepos maps Write/Edit paths in the event log to the child git
+// repos owning them — the fallback when the project root itself is not a
+// repo (multirepo parent). Newest-touched first, deduped.
+// ponytail: capped at 3 repos; raise if sessions routinely span more
+func touchedRepos(root string, events []string) []string {
+	var repos []string
+	seen := map[string]bool{}
+	for i := len(events) - 1; i >= 0 && len(repos) < 3; i-- {
+		p := ""
+		for _, pre := range []string{"@post-tool-use Write ", "@post-tool-use Edit "} {
+			if strings.HasPrefix(events[i], pre) {
+				p = strings.TrimPrefix(events[i], pre)
+			}
+		}
+		if p == "" {
+			continue
+		}
+		if j := strings.Index(p, " error: '"); j >= 0 {
+			p = p[:j]
+		}
+		if r := repoOwning(filepath.Dir(p), root); r != "" && !seen[r] {
+			seen[r] = true
+			repos = append(repos, r)
+		}
+	}
+	return repos
+}
+
+// repoOwning walks dir upward to root looking for a .git; "" when none
+// (root itself is excluded — it already failed the direct checkpoint).
+func repoOwning(dir, root string) string {
+	for dir == root || strings.HasPrefix(dir, root+string(filepath.Separator)) {
+		if dir == root {
+			return ""
+		}
+		if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
+			return dir
+		}
+		dir = filepath.Dir(dir)
+	}
+	return ""
 }
 
 // runAgent runs the agent interactively (stdio attached) with cwd=dir and
