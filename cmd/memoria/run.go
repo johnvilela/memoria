@@ -13,6 +13,17 @@ import (
 
 type sessionEntry struct{ date, sid, name string }
 
+// Handoff packet budgets. The packet travels as ONE argv element and an
+// interactive launch cannot use stdin (that's the user's TTY), so it must
+// stay far under MAX_ARG_STRLEN ~128KiB — see
+// wiki/gotchas/prompt-over-stdin-argv-limit.md.
+const (
+	packetBudget  = 24000 // bytes for the whole packet
+	eventLineMax  = 2000  // runes per digest event line (lines are unbounded)
+	wikiPageMax   = 6000  // runes of the inlined wiki session page
+	chainMaxDepth = 5     // continues_from links followed
+)
+
 // readSessions parses <proj>/.memoria/sessions.md ("RFC3339 - SID - NAME"
 // per line, append-only so last = most recent). Missing file or malformed
 // lines are skipped — callers decide what emptiness means.
@@ -48,27 +59,98 @@ func findDigest(proj, sid string) string {
 	return ""
 }
 
-// digestClient reads the client: frontmatter line of a digest ("" if absent —
-// sessions captured before --client was baked into the hooks).
-func digestClient(path string) string {
+// parseDigest splits a digest file into frontmatter and body. Missing file
+// → "", ""; no frontmatter → "", whole file.
+func parseDigest(path string) (front, body string) {
 	b, err := os.ReadFile(path)
 	if err != nil {
-		return ""
+		return "", ""
 	}
-	rest, ok := strings.CutPrefix(string(b), "---\n")
+	s := string(b)
+	rest, ok := strings.CutPrefix(s, "---\n")
 	if !ok {
-		return ""
+		return "", s
 	}
 	end := strings.Index(rest, "\n---")
 	if end < 0 {
-		return ""
+		return "", s
 	}
-	for _, line := range strings.Split(rest[:end], "\n") {
-		if v, ok := strings.CutPrefix(line, "client:"); ok {
+	return rest[:end], strings.TrimLeft(rest[end+len("\n---"):], "\n")
+}
+
+// frontKey returns the value of a "key:" frontmatter line, "" if absent.
+func frontKey(front, key string) string {
+	for _, line := range strings.Split(front, "\n") {
+		if v, ok := strings.CutPrefix(line, key+":"); ok {
 			return strings.TrimSpace(v)
 		}
 	}
 	return ""
+}
+
+// digestClient reads the client: frontmatter line of a digest ("" if absent —
+// sessions captured before --client was baked into the hooks).
+func digestClient(path string) string {
+	front, _ := parseDigest(path)
+	return frontKey(front, "client")
+}
+
+// digestChain follows continues_from links backwards from path (relative to
+// the digest's dir) and returns the incarnation paths oldest first.
+// Cycle-safe, stops at missing files, capped at chainMaxDepth.
+func digestChain(path string) []string {
+	chain := []string{path}
+	seen := map[string]bool{filepath.Clean(path): true}
+	for len(chain) < chainMaxDepth {
+		front, _ := parseDigest(chain[0])
+		prev := frontKey(front, "continues_from")
+		if prev == "" {
+			break
+		}
+		p := filepath.Clean(filepath.Join(filepath.Dir(chain[0]), prev))
+		if seen[p] {
+			break
+		}
+		if _, err := os.Stat(p); err != nil {
+			break
+		}
+		seen[p] = true
+		chain = append([]string{p}, chain...)
+	}
+	return chain
+}
+
+// digestEvents returns body's non-empty lines capped at eventLineMax runes,
+// with consecutive duplicates removed (hooks can deliver an event twice).
+func digestEvents(body string) []string {
+	var events []string
+	for _, line := range strings.Split(body, "\n") {
+		line = collapse(line, eventLineMax)
+		if line == "" || (len(events) > 0 && events[len(events)-1] == line) {
+			continue
+		}
+		events = append(events, line)
+	}
+	return events
+}
+
+// gitCheckpoint reports HEAD and worktree state for dir, "" when git is
+// absent, dir is not a repository, or the repository has no commits.
+// Var so tests can stub it.
+var gitCheckpoint = func(dir string) string {
+	head, err := exec.Command("git", "-C", dir, "log", "-1", "--oneline").Output()
+	if err != nil {
+		return ""
+	}
+	status, err := exec.Command("git", "-C", dir, "status", "--porcelain").Output()
+	if err != nil {
+		return ""
+	}
+	state := "clean"
+	if lines := strings.TrimSpace(string(status)); lines != "" {
+		state = fmt.Sprintf("dirty — %d file(s)", len(strings.Split(lines, "\n")))
+	}
+	return "HEAD: " + strings.TrimSpace(string(head)) + "\nWorktree: " + state
 }
 
 // matchSessions returns entries whose sid starts with q or whose name
@@ -108,9 +190,76 @@ func nativeResume(bin, client, sid string) []string {
 	return nil
 }
 
-func handoffPrompt(digest string) string {
-	return "Read the session digest at " + digest +
-		" to catch up on what a previous coding session in this project did, then continue that work from where it stopped."
+// buildHandoff renders the cross-harness handoff packet: a self-contained
+// resume briefing passed as the agent's single initial prompt, so the
+// receiving harness starts informed instead of reconstructing the session
+// from a file. Header, git and footer always fit; history events drop
+// oldest-first to stay inside packetBudget.
+func buildHandoff(proj, wikiRoot, sid, digest string) string {
+	source := "an unknown harness (digest predates client tracking)"
+	if c := digestClient(digest); c != "" {
+		source = c
+	}
+	header := "# Resuming an in-progress coding session\n\n" +
+		"You are RESUMING an in-progress coding session in this project — NOT starting a new task.\n" +
+		"The session ran under " + source + "; its event log and current state follow.\n\n" +
+		"Ground rules:\n" +
+		"- Every tool call and file edit listed below ALREADY RAN. It is historical evidence — do not repeat it.\n" +
+		"- The current checkout is authoritative: where the log and the files on disk disagree, trust the files.\n" +
+		"- Skim the history, confirm the state, then continue the work.\n\n"
+
+	gitSec := ""
+	if g := gitCheckpoint(proj); g != "" {
+		gitSec = "## Git checkpoint (at launch)\n\n" + g + "\n\n"
+	}
+
+	chain := digestChain(digest)
+	var bodies []string
+	for _, p := range chain {
+		_, body := parseDigest(p)
+		bodies = append(bodies, body)
+	}
+	events := digestEvents(strings.Join(bodies, "\n"))
+	histHead := "## Session history (oldest first)\n\nFull event log: " + strings.Join(chain, ", ") + "\n\n"
+
+	wikiSec := ""
+	pagePath := filepath.Join(wikiRoot, "sessions", sid+".md")
+	if b, err := os.ReadFile(pagePath); err == nil {
+		page := string(b)
+		if r := []rune(page); len(r) > wikiPageMax {
+			page = string(r[:wikiPageMax]) + "\n\n_(page truncated — read " + pagePath + " for the rest)_"
+		}
+		wikiSec = "## Session summary page (" + pagePath + ")\n\n" + strings.TrimSpace(page) + "\n\n"
+	}
+
+	lead := ""
+	for i := len(events) - 1; i >= 0; i-- {
+		if strings.HasPrefix(events[i], "@stop ") || strings.HasPrefix(events[i], "@subagent-stop ") {
+			lead = "Last reported state: " + events[i] + "\n\n"
+			break
+		}
+	}
+	footer := "## Continue\n\n" + lead +
+		"Continue the work from exactly where the session stopped. Only ask the user if the next step is genuinely unclear from the history above."
+
+	// keep newest events that fit the remaining budget, drop the oldest
+	remaining := packetBudget - len(header) - len(gitSec) - len(histHead) - len(wikiSec) - len(footer)
+	start := len(events)
+	for i := len(events) - 1; i >= 0; i-- {
+		if remaining -= len(events[i]) + 1; remaining < 0 {
+			break
+		}
+		start = i
+	}
+	hist := histHead
+	if start > 0 {
+		hist += fmt.Sprintf("_(%d older events omitted to fit — read the files above for full history)_\n\n", start)
+	}
+	if kept := events[start:]; len(kept) > 0 {
+		hist += strings.Join(kept, "\n") + "\n\n"
+	}
+
+	return header + gitSec + hist + wikiSec + footer
 }
 
 // runAgent runs the agent interactively (stdio attached) with cwd=dir and
@@ -132,7 +281,7 @@ var runAgent = func(dir, bin string, args ...string) (int, error) {
 }
 
 // runRun launches a code agent in the current tracked project, continuing a
-// previous session natively (same harness) or via a digest-pointer prompt.
+// previous session natively (same harness) or via a handoff packet.
 func runRun(cwd, configPath string, args []string, out io.Writer) int {
 	usage := func() int {
 		fmt.Fprintln(out, "usage: memoria run <agent-binary> [--new | --session <id|name>]")
@@ -237,7 +386,7 @@ func runRun(cwd, configPath string, args []string, out io.Writer) int {
 				return 1
 			}
 		} else if agentArgs = nativeResume(bin, digestClient(digest), chosen.sid); agentArgs == nil {
-			agentArgs = []string{handoffPrompt(digest)}
+			agentArgs = []string{buildHandoff(proj, wikiRootFor(cfg, proj), chosen.sid, digest)}
 		}
 	}
 	code, err := runAgent(proj, bin, agentArgs...)

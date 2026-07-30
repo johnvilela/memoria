@@ -63,6 +63,15 @@ func projectAt(cfg config, root string) project {
 	return project{Name: filepath.Base(root), Path: root}
 }
 
+// wikiRootFor returns the project's wiki folder (project.Wiki, default "wiki").
+func wikiRootFor(cfg config, proj string) string {
+	name := projectAt(cfg, proj).Wiki
+	if name == "" {
+		name = "wiki"
+	}
+	return filepath.Join(proj, name)
+}
+
 // matchProject returns the longest tracked project path that contains cwd, or "".
 func matchProject(cwd string, projects []project) string {
 	cwd = filepath.Clean(cwd)
