@@ -9,9 +9,10 @@ Long-term memory and a per-project wiki for code agents, built from their chat s
 ## Concepts — how it works
 
 - [[concepts/architecture-overview]] — capture → consolidate → recall pipeline, config, processors
-- [[concepts/session-capture]] — hooks, live digests, implicit session end, incarnations
+- [[concepts/session-capture]] — hooks, live digests, session titles, implicit session end, incarnations
 - [[concepts/consolidation-pipeline]] — `process`, JSON proposal, lint, cron timer
 - [[concepts/mcp-server]] — the six MCP tools agents get
+- [[concepts/init-setup-multi-agent]] — multi-agent hook/MCP install, the `clients:` registry in config
 - [[concepts/recall-and-run]] — bootstrap, AGENTS.md recall block, `run`'s session picker + cross-harness handoff packet, `search`
 - [[concepts/handoff-vs-ai-memory]] — research: ai-memory's deterministic workstream handoff vs memoria's — spawned the packet handoff (`ad5d206`)
 - [[research/ai-memory-workstream-comparison]] — external (chatgpt) deep-dive on ai-memory v1.19.2 that fed the `run` rework
@@ -43,3 +44,7 @@ Long-term memory and a per-project wiki for code agents, built from their chat s
 - [[sessions/f99b3c0c-68d0-4132-a4b1-cc2538dc1ce7]] — ai-memory research prompt re-asked after /clear; no work captured
 - [[sessions/703f30e4-aabc-48d9-bf89-9bbd90d2428a]] — wiki research + session pages committed: `3252ce0`
 - [[sessions/e915be64-f9af-4a50-a147-8a4831159754]] — `run` handoff rebuilt: digest pointer → self-contained packet (`ad5d206`)
+- [[sessions/80f131bd-209e-4610-8bf3-07dac9154545]] — multi-agent init/setup shipped: `7128a3d`
+- [[sessions/019fb0a0-48d0-71f1-954f-7036553b2133]] — handoff packet dogfooded: codex resumes the claude-code session
+- [[sessions/6d290df9-cc9e-4703-bcc4-2143eba007aa]] — handoff round-trip: claude-code resumes the codex session; obsidian ignore committed (`c0ee15d`)
+- [[sessions/7facd470-c6e9-489b-b490-58832dabc6e2]] — claude session titles captured into digests and the run picker (`c2e7e3a`)
