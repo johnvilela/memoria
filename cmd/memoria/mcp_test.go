@@ -88,6 +88,36 @@ func TestMCPSearchOmitsContentOnManyHits(t *testing.T) {
 	}
 }
 
+func TestMCPRecall(t *testing.T) {
+	proj, cfgPath := mcpFixture(t)
+	res, err := mcpRecall(proj, cfgPath, "") // default = most recent session
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.SessionID != "s1" {
+		t.Fatalf("sid = %q, want s1", res.SessionID)
+	}
+	for _, want := range []string{"# Session record: s1", "@user-prompt 'add a queue'", "## End of record"} {
+		if !strings.Contains(res.Content, want) {
+			t.Fatalf("content missing %q:\n%s", want, res.Content)
+		}
+	}
+	for _, resumeOnly := range []string{"RESUMING", "Continue the work"} {
+		if strings.Contains(res.Content, resumeOnly) {
+			t.Fatalf("recall must not carry resume framing %q:\n%s", resumeOnly, res.Content)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(proj, "wiki", "sessions")); !os.IsNotExist(err) {
+		t.Fatalf("recall must write nothing under wiki/sessions: %v", err)
+	}
+	if _, err := mcpRecall(proj, cfgPath, "../evil"); err == nil {
+		t.Fatal("path-escaping sid must error")
+	}
+	if _, err := mcpRecall(proj, cfgPath, "nope"); err == nil {
+		t.Fatal("unknown sid must error")
+	}
+}
+
 func TestMCPWritePage(t *testing.T) {
 	proj, cfgPath := mcpFixture(t)
 	res, err := mcpWritePage(proj, cfgPath, mcpWritePageIn{

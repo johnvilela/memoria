@@ -64,12 +64,13 @@ memoria run codex          # launch an agent, pick a session to continue
 
 ## MCP server
 
-`memoria init` registers `memoria mcp` with the agent, so sessions get six tools out of the box:
+`memoria init` registers `memoria mcp` with the agent, so sessions get seven tools out of the box:
 
 | Tool | What it does |
 |------|--------------|
 | `memoria_search` | Search the wiki by text or `#tag` (`include_trash` to look inside `trash/`) |
-| `memoria_digest` | Compile a session's observation log into a clean `sessions/<sid>.md` page (background LLM job — call again to poll) |
+| `memoria_recall` | Read-only record of a past session — git checkpoint, event log, last state. No LLM, no writes |
+| `memoria_digest` | Writes/overwrites `sessions/<sid>.md`: compiles the session's observation log into a clean page (background LLM job — call again to poll) |
 | `memoria_consolidate` | Batch-consolidate ended sessions; when the proposal is ready the agent reviews the page list and calls again with `apply=true` |
 | `memoria_lint` | Audit the wiki for contradictions and return the findings |
 | `memoria_write_page` | Create or update a wiki page (path validated, tags frontmatter rendered by memoria) |

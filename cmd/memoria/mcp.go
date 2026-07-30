@@ -23,6 +23,11 @@ type mcpSearchOut struct {
 	Matches []pageHit `json:"matches"`
 }
 
+type mcpRecallOut struct {
+	SessionID string `json:"session_id"`
+	Content   string `json:"content"`
+}
+
 // mcpJobOut is the shared result of the three background LLM tools: digest,
 // consolidate and lint all report started/running/done through it.
 type mcpJobOut struct {
@@ -117,25 +122,47 @@ func mcpJob(cwd, configPath, projName string, ready func(procStatus) (mcpJobOut,
 	return mcpJobOut{State: "started", Detail: detail}, nil
 }
 
+// resolveSession defaults sid to the newest session, validates it and
+// requires its digest file. Returns the sid and the digest path.
+func resolveSession(proj, sid string) (string, string, error) {
+	if sid == "" {
+		// default = most recent session (usually the caller's own)
+		entries := readSessions(proj)
+		if len(entries) == 0 {
+			return "", "", fmt.Errorf("no sessions recorded for this project")
+		}
+		sid = entries[len(entries)-1].sid
+	}
+	if sid != filepath.Base(sid) || sid == "." || sid == ".." {
+		return "", "", fmt.Errorf("invalid session id %q", sid)
+	}
+	digest := findDigest(proj, sid)
+	if digest == "" {
+		return "", "", fmt.Errorf("no digest found for session %s", sid)
+	}
+	return sid, digest, nil
+}
+
+func mcpRecall(cwd, configPath, sessionID string) (mcpRecallOut, error) {
+	_, proj, _, wikiRoot, err := mcpProject(cwd, configPath)
+	if err != nil {
+		return mcpRecallOut{}, err
+	}
+	sid, digest, err := resolveSession(proj, sessionID)
+	if err != nil {
+		return mcpRecallOut{}, err
+	}
+	return mcpRecallOut{SessionID: sid, Content: buildHandoff(proj, wikiRoot, sid, digest, false)}, nil
+}
+
 func mcpDigest(cwd, configPath, sessionID string) (mcpJobOut, error) {
 	_, proj, projName, wikiRoot, err := mcpProject(cwd, configPath)
 	if err != nil {
 		return mcpJobOut{}, err
 	}
-	sid := sessionID
-	if sid == "" {
-		// default = most recent session (usually the caller's own)
-		entries := readSessions(proj)
-		if len(entries) == 0 {
-			return mcpJobOut{}, fmt.Errorf("no sessions recorded for this project")
-		}
-		sid = entries[len(entries)-1].sid
-	}
-	if sid != filepath.Base(sid) || sid == "." || sid == ".." {
-		return mcpJobOut{}, fmt.Errorf("invalid session id %q", sid)
-	}
-	if findDigest(proj, sid) == "" {
-		return mcpJobOut{}, fmt.Errorf("no digest found for session %s", sid)
+	sid, _, err := resolveSession(proj, sessionID)
+	if err != nil {
+		return mcpJobOut{}, err
 	}
 	rel := "sessions/" + sid + ".md"
 	ready := func(s procStatus) (mcpJobOut, bool) {
@@ -333,11 +360,25 @@ func runMCP(configPath string, out io.Writer) int {
 			return nil, res, err
 		})
 
+	type recallIn struct {
+		SessionID string `json:"session_id,omitempty" jsonschema:"session to recall; defaults to the most recent session (usually the caller's own)"`
+	}
+	mcp.AddTool(srv, &mcp.Tool{Name: "memoria_recall",
+		Description: "Read-only: return a past session's full record — git checkpoint, event log, last state, wiki summary if one exists. Use this to answer questions like \"what did we do in this session?\". No LLM call, nothing is written."},
+		func(ctx context.Context, req *mcp.CallToolRequest, in recallIn) (*mcp.CallToolResult, mcpRecallOut, error) {
+			d, err := cwd()
+			if err != nil {
+				return nil, mcpRecallOut{}, err
+			}
+			res, err := mcpRecall(d, configPath, in.SessionID)
+			return nil, res, err
+		})
+
 	type digestIn struct {
 		SessionID string `json:"session_id,omitempty" jsonschema:"session to compile; defaults to the most recent session"`
 	}
 	mcp.AddTool(srv, &mcp.Tool{Name: "memoria_digest",
-		Description: "Compile a session's observation log into its clean wiki page at sessions/<id>.md. Background LLM job: first call starts it, call again to poll until state=done."},
+		Description: "WRITES the wiki page sessions/<id>.md (overwriting any existing one) by compiling the session's observation log with an LLM. Use only when the user wants the session saved to the wiki — to recall what happened, use memoria_recall or memoria_search instead. Background job: first call starts it, call again to poll until state=done."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in digestIn) (*mcp.CallToolResult, mcpJobOut, error) {
 			d, err := cwd()
 			if err != nil {

@@ -195,7 +195,7 @@ func nativeResume(bin, client, sid string) []string {
 // receiving harness starts informed instead of reconstructing the session
 // from a file. Header, git and footer always fit; history events drop
 // oldest-first to stay inside packetBudget.
-func buildHandoff(proj, wikiRoot, sid, digest string) string {
+func buildHandoff(proj, wikiRoot, sid, digest string, resume bool) string {
 	source := "an unknown harness (digest predates client tracking)"
 	if c := digestClient(digest); c != "" {
 		source = c
@@ -207,6 +207,11 @@ func buildHandoff(proj, wikiRoot, sid, digest string) string {
 		"- Every tool call and file edit listed below ALREADY RAN. It is historical evidence — do not repeat it.\n" +
 		"- The current checkout is authoritative: where the log and the files on disk disagree, trust the files.\n" +
 		"- Skim the history, confirm the state, then continue the work.\n\n"
+	if !resume {
+		header = "# Session record: " + sid + "\n\n" +
+			"Read-only record of a past coding session in this project (ran under " + source + ").\n" +
+			"Use it to answer questions about what happened. Everything below already ran — do not re-run anything.\n\n"
+	}
 
 	gitSec := ""
 	if g := gitCheckpoint(proj); g != "" {
@@ -241,6 +246,9 @@ func buildHandoff(proj, wikiRoot, sid, digest string) string {
 	}
 	footer := "## Continue\n\n" + lead +
 		"Continue the work from exactly where the session stopped. Only ask the user if the next step is genuinely unclear from the history above."
+	if !resume {
+		footer = "## End of record\n\n" + lead
+	}
 
 	// keep newest events that fit the remaining budget, drop the oldest
 	remaining := packetBudget - len(header) - len(gitSec) - len(histHead) - len(wikiSec) - len(footer)
@@ -386,7 +394,7 @@ func runRun(cwd, configPath string, args []string, out io.Writer) int {
 				return 1
 			}
 		} else if agentArgs = nativeResume(bin, digestClient(digest), chosen.sid); agentArgs == nil {
-			agentArgs = []string{buildHandoff(proj, wikiRootFor(cfg, proj), chosen.sid, digest)}
+			agentArgs = []string{buildHandoff(proj, wikiRootFor(cfg, proj), chosen.sid, digest, true)}
 		}
 	}
 	code, err := runAgent(proj, bin, agentArgs...)
