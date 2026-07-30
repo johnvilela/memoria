@@ -22,7 +22,7 @@ Long-term memory and a per-project wiki for code agents, built from their chat s
 - [[decisions/0001-plain-markdown-no-db]] — plain `.md` in the repo, versioned with the project
 - [[decisions/0002-llm-never-writes-files]] — proposal + review gate
 - [[decisions/0003-never-block-the-agent]] — LLM-driven work runs detached
-- [[decisions/0004-embedded-prompts-with-file-override]] — prompts ship in the binary, a config file overrides
+- [[decisions/0004-embedded-prompts-with-file-override]] — prompts ship in the binary (`cmd/memoria/prompts/`), a config file overrides
 - [[decisions/0005-auto-apply-is-opt-in]] — autopilot off by default
 
 ## Gotchas — what bit us
@@ -47,4 +47,5 @@ Long-term memory and a per-project wiki for code agents, built from their chat s
 - [[sessions/80f131bd-209e-4610-8bf3-07dac9154545]] — multi-agent init/setup shipped: `7128a3d`
 - [[sessions/019fb0a0-48d0-71f1-954f-7036553b2133]] — handoff packet dogfooded: codex resumes the claude-code session
 - [[sessions/6d290df9-cc9e-4703-bcc4-2143eba007aa]] — handoff round-trip: claude-code resumes the codex session; obsidian ignore committed (`c0ee15d`)
-- [[sessions/7facd470-c6e9-489b-b490-58832dabc6e2]] — claude session titles captured into digests and the run picker (`c2e7e3a`)
+- [[sessions/7facd470-c6e9-489b-b490-58832dabc6e2]] — claude session titles captured into digests and the run picker (`c2e7e3a`), plus prompts moved to `cmd/memoria/prompts/` (`c478df6`)
+- [[sessions/019fb0c0-23aa-7583-9035-ad2d71dd4ac6]] — wiki committed as `147ed73` over a packet handoff; "what did we do?" answered from the session's own page
