@@ -464,3 +464,147 @@ func TestHookSessionEndBusyNoSpawn(t *testing.T) {
 		t.Fatalf("spawned %v while busy", *spawned)
 	}
 }
+
+func stopPayload(sid, cwd, msg string) *strings.Reader {
+	b, _ := json.Marshal(map[string]any{"session_id": sid, "cwd": cwd, "last_assistant_message": msg})
+	return strings.NewReader(string(b))
+}
+
+// fakeClaudeHome points HOME at a temp dir holding a ~/.claude/sessions live
+// file titled title for sid, plus a non-matching and a garbage neighbor.
+func fakeClaudeHome(t *testing.T, sid, title string) {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dir := filepath.Join(home, ".claude", "sessions")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{
+		"1.json": `{"sessionId":"someone-else","name":"wrong"}`,
+		"2.json": fmt.Sprintf(`{"pid":1,"sessionId":%q,"name":%q,"status":"busy"}`, sid, title),
+		"3.json": `not json at all`,
+	}
+	for name, body := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestClaudeTitle(t *testing.T) {
+	fakeClaudeHome(t, "s1", "Fix the picker")
+	if got := claudeTitle("s1"); got != "Fix the picker" {
+		t.Fatalf("claudeTitle = %q", got)
+	}
+	if got := claudeTitle("unknown-sid"); got != "" {
+		t.Fatalf("unknown sid got %q", got)
+	}
+	t.Setenv("HOME", t.TempDir()) // no .claude/sessions dir
+	if got := claudeTitle("s1"); got != "" {
+		t.Fatalf("missing dir got %q", got)
+	}
+}
+
+func TestCaptureHookStopCapturesTitle(t *testing.T) {
+	proj := t.TempDir()
+	cfg := testConfig(t, proj)
+	fakeClaudeHome(t, "s1", "Session titles in run")
+	if err := captureHook("user-prompt", nil, promptPayload("s1", proj, "first prompt"), cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err := captureHook("stop", []string{"--client", "claude-code"}, stopPayload("s1", proj, "done"), cfg); err != nil {
+		t.Fatal(err)
+	}
+	if got := readDigest(t, proj, "s1"); !strings.Contains(got, "\ntitle: Session titles in run\n") {
+		t.Fatalf("digest missing title:\n%s", got)
+	}
+	idx, err := os.ReadFile(indexFile(proj))
+	if err != nil {
+		t.Fatal(err)
+	}
+	line := strings.TrimSpace(string(idx))
+	parts := strings.SplitN(line, " - ", 3)
+	if len(parts) != 3 || parts[1] != "s1" || parts[2] != "Session titles in run" {
+		t.Fatalf("index line = %q", line)
+	}
+	if _, err := time.Parse(time.RFC3339, parts[0]); err != nil {
+		t.Fatalf("date slot broken: %q", parts[0])
+	}
+}
+
+func TestCaptureHookStopTitleIdempotent(t *testing.T) {
+	proj := t.TempDir()
+	cfg := testConfig(t, proj)
+	fakeClaudeHome(t, "s1", "Stable title")
+	if err := captureHook("user-prompt", nil, promptPayload("s1", proj, "hi"), cfg); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if err := captureHook("stop", []string{"--client", "claude-code"}, stopPayload("s1", proj, "done"), cfg); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := readDigest(t, proj, "s1"); strings.Count(got, "title:") != 1 {
+		t.Fatalf("want exactly one title line:\n%s", got)
+	}
+	idx, _ := os.ReadFile(indexFile(proj))
+	if n := strings.Count(string(idx), "Stable title"); n != 1 {
+		t.Fatalf("index rewritten badly (%d matches):\n%s", n, idx)
+	}
+}
+
+func TestCaptureHookCodexNoTitle(t *testing.T) {
+	proj := t.TempDir()
+	cfg := testConfig(t, proj)
+	fakeClaudeHome(t, "s1", "Should not appear")
+	if err := captureHook("user-prompt", nil, promptPayload("s1", proj, "first prompt"), cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err := captureHook("stop", []string{"--client", "codex"}, stopPayload("s1", proj, "done"), cfg); err != nil {
+		t.Fatal(err)
+	}
+	if got := readDigest(t, proj, "s1"); strings.Contains(got, "title:") {
+		t.Fatalf("codex session got a title:\n%s", got)
+	}
+	idx, _ := os.ReadFile(indexFile(proj))
+	if !strings.Contains(string(idx), "first prompt") {
+		t.Fatalf("index lost first-prompt name:\n%s", idx)
+	}
+}
+
+func TestRenameSessionPreservesOtherLines(t *testing.T) {
+	proj := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(proj, ".memoria"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	lines := []string{
+		"2026-01-01T00:00:00Z - aaa - keep me",
+		"2026-01-02T00:00:00Z - bbb - name - with - dashes",
+		"2026-01-03T00:00:00Z - ccc - also keep",
+		"",
+	}
+	if err := os.WriteFile(indexFile(proj), []byte(strings.Join(lines, "\n")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := renameSession(proj, "bbb", "New Title"); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(indexFile(proj))
+	want := "2026-01-01T00:00:00Z - aaa - keep me\n2026-01-02T00:00:00Z - bbb - New Title\n2026-01-03T00:00:00Z - ccc - also keep\n"
+	if string(b) != want {
+		t.Fatalf("got:\n%s\nwant:\n%s", b, want)
+	}
+}
+
+func TestCaptureHookStopNoDigestNoError(t *testing.T) {
+	proj := t.TempDir()
+	cfg := testConfig(t, proj)
+	fakeClaudeHome(t, "s1", "Titled but empty")
+	if err := captureHook("stop", []string{"--client", "claude-code"}, stopPayload("s1", proj, ""), cfg); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(digestFile(proj, "s1")); !os.IsNotExist(err) {
+		t.Fatalf("digest unexpectedly created: %v", err)
+	}
+}

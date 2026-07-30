@@ -182,6 +182,11 @@ func captureHook(name string, hookArgs []string, stdin io.Reader, configPath str
 	if err := appendDigest(proj, projName, sid, name, client, payload, queuePath(configPath)); err != nil {
 		return err
 	}
+	if client == "claude-code" && (name == "stop" || name == "session-end") {
+		if err := captureTitle(proj, sid); err != nil {
+			return err
+		}
+	}
 	if name == "session-end" && cfg.AutoApply {
 		autoConsolidate(configPath, proj, projName)
 	}
@@ -297,7 +302,7 @@ project_root: %s
 		return err
 	}
 	if name == "session-end" {
-		if err := setEndedAt(path, now); err != nil {
+		if err := setFront(path, "ended_at", now); err != nil {
 			return err
 		}
 	}
@@ -325,8 +330,8 @@ project_root: %s
 	return nil
 }
 
-// setEndedAt inserts or updates "ended_at:" in the digest's frontmatter.
-func setEndedAt(path, ts string) error {
+// setFront inserts or updates a "key:" line in the digest's frontmatter.
+func setFront(path, key, val string) error {
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return err
@@ -336,14 +341,86 @@ func setEndedAt(path, ts string) error {
 		return nil
 	}
 	for i := 1; i < len(lines); i++ {
-		if strings.HasPrefix(lines[i], "ended_at:") {
-			lines[i] = "ended_at: " + ts
+		if strings.HasPrefix(lines[i], key+":") {
+			lines[i] = key + ": " + val
 			return os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0o644)
 		}
 		if lines[i] == "---" {
-			lines = slices.Insert(lines, i, "ended_at: "+ts)
+			lines = slices.Insert(lines, i, key+": "+val)
 			return os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0o644)
 		}
+	}
+	return nil
+}
+
+// claudeTitle returns the live title of a running Claude Code session from
+// ~/.claude/sessions/*.json, "" when the file is gone or sid is unknown.
+func claudeTitle(sid string) string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	dir := filepath.Join(home, ".claude", "sessions")
+	entries, _ := os.ReadDir(dir)
+	for _, e := range entries {
+		if !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		b, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		if err != nil {
+			continue
+		}
+		var s struct {
+			SessionID string `json:"sessionId"`
+			Name      string `json:"name"`
+		}
+		if json.Unmarshal(b, &s) == nil && s.SessionID == sid && s.Name != "" {
+			return s.Name
+		}
+	}
+	return ""
+}
+
+// captureTitle copies the agent's live session title into the current digest
+// incarnation's frontmatter and the sessions.md NAME slot. Missing title,
+// missing digest, or unchanged title are no-ops — hooks are best-effort.
+// ponytail: codex skipped — threads.name is null unless manually renamed and
+// we have no sqlite driver; shell out to sqlite3 if codex ships real titles
+func captureTitle(proj, sid string) error {
+	title := collapse(claudeTitle(sid), 80)
+	if title == "" {
+		return nil
+	}
+	path, _ := resolveDigestPath(proj, sid)
+	front, _ := parseDigest(path)
+	if frontKey(front, "title") == title {
+		return nil
+	}
+	if err := setFront(path, "title", title); err != nil {
+		return nil
+	}
+	return renameSession(proj, sid, title)
+}
+
+// renameSession rewrites the NAME slot of sid's sessions.md line in place.
+func renameSession(proj, sid, title string) error {
+	path := filepath.Join(proj, ".memoria", "sessions.md")
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	lines := strings.Split(string(b), "\n")
+	for i, line := range lines {
+		// limit 3: NAME may itself contain " - " (see readSessions)
+		parts := strings.SplitN(line, " - ", 3)
+		if len(parts) != 3 || parts[1] != sid {
+			continue
+		}
+		if parts[2] == title {
+			return nil
+		}
+		lines[i] = parts[0] + " - " + sid + " - " + title
+		return os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0o644)
 	}
 	return nil
 }
