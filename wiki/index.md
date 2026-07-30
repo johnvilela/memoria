@@ -11,7 +11,7 @@ Long-term memory and a per-project wiki for code agents, built from their chat s
 - [[concepts/architecture-overview]] — capture → consolidate → recall pipeline, config, processors
 - [[concepts/session-capture]] — hooks, live digests, session titles, implicit session end, incarnations
 - [[concepts/consolidation-pipeline]] — `process`, JSON proposal, lint, cron timer
-- [[concepts/mcp-server]] — the six MCP tools agents get
+- [[concepts/mcp-server]] — the seven MCP tools agents get; `memoria_recall` is the read-only recall path
 - [[concepts/init-setup-multi-agent]] — multi-agent hook/MCP install, the `clients:` registry in config
 - [[concepts/recall-and-run]] — bootstrap, AGENTS.md recall block, `run`'s session picker + cross-harness handoff packet, `search`
 - [[concepts/handoff-vs-ai-memory]] — research: ai-memory's deterministic workstream handoff vs memoria's — spawned the packet handoff (`ad5d206`)
@@ -32,6 +32,7 @@ Long-term memory and a per-project wiki for code agents, built from their chat s
 - [[gotchas/prompt-over-stdin-argv-limit]] — processor prompt goes over stdin (E2BIG)
 - [[gotchas/stale-prompt-overrides]] — old materialized prompt files silently pin prompts
 - [[gotchas/module-path-mismatch-breaks-go-install]] — fix `go.mod` path before tagging a release
+- [[gotchas/auto-apply-rewrites-wiki-mid-session]] — background auto-apply consolidation can modify `wiki/` while a session is running
 
 ## Sessions — the episodic log
 
@@ -49,3 +50,4 @@ Long-term memory and a per-project wiki for code agents, built from their chat s
 - [[sessions/6d290df9-cc9e-4703-bcc4-2143eba007aa]] — handoff round-trip: claude-code resumes the codex session; obsidian ignore committed (`c0ee15d`)
 - [[sessions/7facd470-c6e9-489b-b490-58832dabc6e2]] — claude session titles captured into digests and the run picker (`c2e7e3a`), plus prompts moved to `cmd/memoria/prompts/` (`c478df6`)
 - [[sessions/019fb0c0-23aa-7583-9035-ad2d71dd4ac6]] — wiki committed as `147ed73` over a packet handoff; "what did we do?" answered from the session's own page
+- [[sessions/67c500e5-dc86-4a64-8e79-a76444932b79]] — `memoria_recall` shipped (`d6edeea`): read-only "what did we do?" answers, digest rerouted
