@@ -586,11 +586,11 @@ func TestRenderPage(t *testing.T) {
 
 func TestValidPagePath(t *testing.T) {
 	for p, want := range map[string]bool{
-		"index.md":          true,
-		"concepts/x.md":     true,
-		"sessions/s1.md":    true,
-		"sessions/../x.md":  false,
-		"trash/x.md":        false,
+		"index.md":            true,
+		"concepts/x.md":       true,
+		"sessions/s1.md":      true,
+		"sessions/../x.md":    false,
+		"trash/x.md":          false,
 		"trash/concepts/x.md": false,
 	} {
 		if validPagePath(p) != want {

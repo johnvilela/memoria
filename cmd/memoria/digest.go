@@ -139,6 +139,7 @@ func digestForeground(cfg config, proj, wikiRoot, configPath, projName, sid stri
 		return fail(err)
 	}
 	rel := "sessions/" + sid + ".md"
+	commitWiki(cfg, wikiRoot, "session digest", rel, 1)
 	fmt.Fprintf(out, "wrote %s\n", pagePath)
 	if serr := statusSet(statusPath(configPath), projName, "done", 0, "session page written: "+rel); serr != nil {
 		logf("digest", "%s: status: %v", projName, serr)

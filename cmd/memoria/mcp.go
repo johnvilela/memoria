@@ -179,7 +179,7 @@ func mcpDigest(cwd, configPath, sessionID string) (mcpJobOut, error) {
 }
 
 func mcpConsolidate(cwd, configPath string, apply bool) (mcpJobOut, error) {
-	_, proj, projName, wikiRoot, err := mcpProject(cwd, configPath)
+	cfg, proj, projName, wikiRoot, err := mcpProject(cwd, configPath)
 	if err != nil {
 		return mcpJobOut{}, err
 	}
@@ -190,7 +190,7 @@ func mcpConsolidate(cwd, configPath string, apply bool) (mcpJobOut, error) {
 			return mcpJobOut{}, err
 		}
 		var buf strings.Builder
-		if code := applyProposal(proj, wikiRoot, proposalPath, queuePath(configPath), projName, &buf); code != 0 {
+		if code := applyProposal(cfg, proj, wikiRoot, proposalPath, queuePath(configPath), projName, &buf); code != 0 {
 			return mcpJobOut{}, fmt.Errorf("apply failed: %s", strings.TrimSpace(buf.String()))
 		}
 		return mcpJobOut{State: "done", Detail: "proposal applied", Pages: pages}, nil

@@ -162,6 +162,11 @@ func seedWiki(cfg config, dir, wikiRoot, configPath string, out io.Writer) (stri
 		}
 		fmt.Fprintf(out, "wrote %s\n", dst)
 	}
+	paths := make([]string, len(pp.Pages))
+	for i, pg := range pp.Pages {
+		paths[i] = pg.Path
+	}
+	commitWiki(cfg, wikiRoot, "seed wiki", pageSummary(paths), len(paths))
 	fmt.Fprintf(out, "Wiki seeded with %d page(s) in %s\n", len(pp.Pages), wikiRoot)
 	return pp.Rationale, nil
 }
@@ -188,4 +193,3 @@ func buildSeedPrompt(rules, dir string) string {
 	}
 	return b.String()
 }
-

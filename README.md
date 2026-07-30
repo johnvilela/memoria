@@ -87,9 +87,9 @@ The long-running tools (digest, consolidate, lint) never block the agent: the fi
 - **Cron** — `--cron` installs a systemd user timer running `process --all` on your schedule (`hourly`, `every 3 hours`, `8 times a day`, or 5-field cron); `--cron-apply` makes it apply proposals without review.
 - **Autopilot** — `--auto-apply` (off by default) removes every manual step: ending a session triggers consolidation by itself, proposals are written straight to the wiki, and lint findings are fixed immediately. The review gate comes back the moment you turn it off.
 - **Recall** — `bootstrap` writes a marker block into the project's `AGENTS.md` telling agents where the memory lives and to prefer the MCP tools; `memoria run` carries a finished session into the next one, natively when it's the same harness.
-- **Markdown in the repo** — session digests stay untracked (`.memoria/` is gitignored); the curated `wiki/` folder is meant to be committed. Deleted pages land in `wiki/trash/` instead of vanishing.
+- **Markdown in the repo** — session digests stay untracked (`.memoria/` is gitignored); the curated `wiki/` folder is meant to be committed. When the wiki sits inside a git repo, applied changes (proposals, lint fixes, seed, session pages) are auto-committed with a `docs(wiki): ...` message (`wiki_commit_message` in config customizes the pattern; skipped silently outside a repo). Deleted pages land in `wiki/trash/` instead of vanishing.
 
-Config lives at `~/.config/memoria/config.yaml` (`projects`, `processor`, `notifications`, `auto_apply`, `cron` and `gemini_api_key` when the gemini processor is chosen — the file is written 0600). The gemini key can also come from the `GEMINI_API_KEY` env var.
+Config lives at `~/.config/memoria/config.yaml` (`projects`, `processor`, `processor_model`, `processor_effort`, `wiki_commit_message`, `notifications`, `auto_apply`, `cron` and `gemini_api_key` when the gemini processor is chosen — the file is written 0600). The gemini key can also come from the `GEMINI_API_KEY` env var.
 
 ## Development
 

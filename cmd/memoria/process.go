@@ -118,7 +118,7 @@ func runProcess(cwd, configPath string, args []string, out io.Writer) int {
 		return inspectProcess(configPath, p.Name, out)
 	}
 	if *apply {
-		return applyProposal(proj, wikiRoot, proposalPath, queuePath(configPath), p.Name, out)
+		return applyProposal(cfg, proj, wikiRoot, proposalPath, queuePath(configPath), p.Name, out)
 	}
 	if !*foreground {
 		return detachProcess(cfg, cwd, configPath, p.Name, out)
@@ -201,7 +201,7 @@ func processAll(cfg config, configPath string, apply bool, out io.Writer) int {
 		// with auto_apply generateProposal already applied — a second apply
 		// would fail on the consumed proposal
 		if apply && !cfg.AutoApply {
-			if code := applyProposal(root, wikiRoot, proposalPath, queuePath(configPath), p.Name, out); code != 0 {
+			if code := applyProposal(cfg, root, wikiRoot, proposalPath, queuePath(configPath), p.Name, out); code != 0 {
 				failed++
 			}
 		}
@@ -307,7 +307,7 @@ func generateProposal(cfg config, proj, wikiRoot, proposalPath, configPath, proj
 		fmt.Fprintf(out, "  %s — %s\n", pg.Path, pg.Title)
 	}
 	if cfg.AutoApply {
-		if code := applyProposal(proj, wikiRoot, proposalPath, queuePath(configPath), projName, out); code != 0 {
+		if code := applyProposal(cfg, proj, wikiRoot, proposalPath, queuePath(configPath), projName, out); code != 0 {
 			return fail(fmt.Errorf("auto-apply failed — proposal kept at %s", proposalPath))
 		}
 		done(fmt.Sprintf("applied %d pages from %d sessions", len(prop.Pages), len(sessions)))
@@ -322,7 +322,7 @@ func generateProposal(cfg config, proj, wikiRoot, proposalPath, configPath, proj
 	return 0
 }
 
-func applyProposal(proj, wikiRoot, proposalPath, qPath, projName string, out io.Writer) int {
+func applyProposal(cfg config, proj, wikiRoot, proposalPath, qPath, projName string, out io.Writer) int {
 	b, err := os.ReadFile(proposalPath)
 	if err != nil {
 		fmt.Fprintln(out, "error: no proposal found — run memoria process first")
@@ -369,6 +369,11 @@ func applyProposal(proj, wikiRoot, proposalPath, qPath, projName string, out io.
 		}
 	}
 	_ = os.Remove(proposalPath)
+	paths := make([]string, len(prop.Pages))
+	for i, pg := range prop.Pages {
+		paths[i] = pg.Path
+	}
+	commitWiki(cfg, wikiRoot, "apply proposal", pageSummary(paths), len(paths))
 	fmt.Fprintf(out, "Applied %d page(s); %d session(s) moved to processed/\n", len(prop.Pages), len(prop.Sessions))
 	logf("process", "%s: applied %d pages, %d sessions processed", projName, len(prop.Pages), len(prop.Sessions))
 	return 0

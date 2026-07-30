@@ -15,16 +15,17 @@ type project struct {
 }
 
 type config struct {
-	Projects        []project `yaml:"projects"`
-	Processor       string    `yaml:"processor,omitempty"`        // AI provider that processes sessions into wiki/memories
-	ProcessorModel  string    `yaml:"processor_model,omitempty"`  // model for the CLI processors; empty = cheap default (haiku / gpt-5.4.mini)
-	ProcessorEffort string    `yaml:"processor_effort,omitempty"` // codex reasoning effort; empty = high
-	GeminiAPIKey    string    `yaml:"gemini_api_key,omitempty"`   // only when processor is gemini
-	Notifications   bool      `yaml:"notifications,omitempty"`    // desktop notification when background processing finishes
-	Cron            string    `yaml:"cron,omitempty"`             // schedule input, verbatim (systemd timer runs process --all)
-	CronApply       bool      `yaml:"cron_apply,omitempty"`       // timer applies proposals without review
-	AutoApply       bool      `yaml:"auto_apply,omitempty"`       // autopilot: session end consolidates, proposals and lint fixes apply without review
-	Clients         []string  `yaml:"clients,omitempty"`          // agents with capture hooks installed
+	Projects          []project `yaml:"projects"`
+	Processor         string    `yaml:"processor,omitempty"`           // AI provider that processes sessions into wiki/memories
+	ProcessorModel    string    `yaml:"processor_model,omitempty"`     // model for the CLI processors; empty = cheap default (haiku / gpt-5.4.mini)
+	ProcessorEffort   string    `yaml:"processor_effort,omitempty"`    // codex reasoning effort; empty = high
+	WikiCommitMessage string    `yaml:"wiki_commit_message,omitempty"` // pattern for wiki auto-commits; placeholders {action} {summary} {count} {project}
+	GeminiAPIKey      string    `yaml:"gemini_api_key,omitempty"`      // only when processor is gemini
+	Notifications     bool      `yaml:"notifications,omitempty"`       // desktop notification when background processing finishes
+	Cron              string    `yaml:"cron,omitempty"`                // schedule input, verbatim (systemd timer runs process --all)
+	CronApply         bool      `yaml:"cron_apply,omitempty"`          // timer applies proposals without review
+	AutoApply         bool      `yaml:"auto_apply,omitempty"`          // autopilot: session end consolidates, proposals and lint fixes apply without review
+	Clients           []string  `yaml:"clients,omitempty"`             // agents with capture hooks installed
 }
 
 func loadConfig(path string) (config, error) {

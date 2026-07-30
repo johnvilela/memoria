@@ -290,6 +290,11 @@ func lintApply(cfg config, wikiRoot, lintPath string, out io.Writer) int {
 		fmt.Fprintf(out, "wrote %s\n", dst)
 	}
 	_ = os.Remove(lintPath)
+	paths := make([]string, len(fix.Pages))
+	for i, pg := range fix.Pages {
+		paths[i] = pg.Path
+	}
+	commitWiki(cfg, wikiRoot, "lint fix", pageSummary(paths), len(paths))
 	fmt.Fprintf(out, "Applied %d change(s); report consumed.\n", len(fix.Pages))
 	logf("lint", "applied %d changes from %s", len(fix.Pages), lintPath)
 	return 0
