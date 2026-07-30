@@ -13,7 +13,8 @@ Long-term memory and a per-project wiki for code agents, built from their chat s
 - [[concepts/consolidation-pipeline]] — `process`, JSON proposal, lint, cron timer
 - [[concepts/mcp-server]] — the seven MCP tools agents get; `memoria_recall` is the read-only recall path
 - [[concepts/init-setup-multi-agent]] — multi-agent hook/MCP install, the `clients:` registry in config
-- [[concepts/recall-and-run]] — bootstrap, AGENTS.md recall block, `run`'s session picker + cross-harness handoff packet, `search`
+- [[concepts/recall-and-run]] — bootstrap, AGENTS.md recall block, `run`'s session picker + cross-harness handoff packet (ask-first since `6414c80`), `search`
+- [[concepts/multirepo-parent-project]] — how memoria behaves on a multirepo parent folder; the eparts verdict — adaptations shipped as `31b7251`
 - [[concepts/handoff-vs-ai-memory]] — research: ai-memory's deterministic workstream handoff vs memoria's — spawned the packet handoff (`ad5d206`)
 - [[research/ai-memory-workstream-comparison]] — external (chatgpt) deep-dive on ai-memory v1.19.2 that fed the `run` rework
 
@@ -33,6 +34,7 @@ Long-term memory and a per-project wiki for code agents, built from their chat s
 - [[gotchas/stale-prompt-overrides]] — old materialized prompt files silently pin prompts
 - [[gotchas/module-path-mismatch-breaks-go-install]] — fix `go.mod` path before tagging a release
 - [[gotchas/auto-apply-rewrites-wiki-mid-session]] — background auto-apply consolidation can modify `wiki/` while a session is running
+- [[gotchas/subagent-stop-promoted-to-user-request]] — handoff auto-ran a subagent's internal note; ask-first since `6414c80`
 
 ## Sessions — the episodic log
 
@@ -51,3 +53,5 @@ Long-term memory and a per-project wiki for code agents, built from their chat s
 - [[sessions/7facd470-c6e9-489b-b490-58832dabc6e2]] — claude session titles captured into digests and the run picker (`c2e7e3a`), plus prompts moved to `cmd/memoria/prompts/` (`c478df6`)
 - [[sessions/019fb0c0-23aa-7583-9035-ad2d71dd4ac6]] — wiki committed as `147ed73` over a packet handoff; "what did we do?" answered from the session's own page
 - [[sessions/67c500e5-dc86-4a64-8e79-a76444932b79]] — `memoria_recall` shipped (`d6edeea`): read-only "what did we do?" answers, digest rerouted
+- [[sessions/019fb0d1-0ea2-71c3-a0c2-616d5973374c]] — deferred wiki commit lands as `4d9171a` over a fourth packet handoff; recall question answered write-free
+- [[sessions/e112664f-9954-4d8e-8fd2-a11e13d66bc0]] — handoff made ask-first (`6414c80`); multirepo assessment for eparts, adaptations committed as `31b7251` in incarnation 2
