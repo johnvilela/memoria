@@ -4,11 +4,11 @@ tags: [handoff, ai-memory, research, comparison]
 
 # Handoff between agents: memoria vs ai-memory
 
-Findings from a research-only comparison of memoria's agent handoff with Fabio Akita's [ai-memory](https://github.com/akitaonrails/ai-memory) ([[sessions/0075f9e5-98eb-4d2e-bd20-3e8f5c52b069]]). These are recorded analysis and candidate ideas — none of it is implemented in memoria.
+Findings from a research-only comparison of memoria's agent handoff with Fabio Akita's [ai-memory](https://github.com/akitaonrails/ai-memory) ([[sessions/0075f9e5-98eb-4d2e-bd20-3e8f5c52b069]]). A deeper external (chatgpt) writeup lives at [[research/ai-memory-workstream-comparison]]. The analysis below is the research-time snapshot; the rework it triggered is in the **Outcome** section at the end.
 
-## How memoria hands off today
+## How memoria handed off at research time
 
-Same harness → native resume (`claude --resume`, `codex resume`); different harness → a one-sentence handoff prompt pointing at the session digest (`run.go:111`), with the digest content never inlined ([[concepts/recall-and-run]]). The digest itself is memoria's own capture: `@hook` annotated one-liners — prompts, Write/Edit/Bash, assistant text only at `stop` ([[concepts/session-capture]]). A high-quality handoff artifact requires an LLM digest/consolidate pass, which runs detached and takes minutes ([[decisions/0003-never-block-the-agent]]).
+Same harness → native resume (`claude --resume`, `codex resume`); different harness → a one-sentence handoff prompt pointing at the session digest (`run.go:111`), with the digest content never inlined. The digest itself is memoria's own capture: `@hook` annotated one-liners — prompts, Write/Edit/Bash, assistant text only at `stop` ([[concepts/session-capture]]). A high-quality handoff artifact required an LLM digest/consolidate pass, which runs detached and takes minutes ([[decisions/0003-never-block-the-agent]]).
 
 ## How ai-memory works
 
@@ -19,6 +19,8 @@ Same harness → native resume (`claude --resume`, `codex resume`); different ha
 - **Adoption**: the first managed run in an empty workstream offers up to 8 recent native sessions from cwd to adopt — bootstrap only; once established, links rule.
 
 ## The comparison, side by side
+
+Snapshot at research time — the cross-harness row is superseded by the outcome below.
 
 | Aspect | memoria | ai-memory |
 |---|---|---|
@@ -32,16 +34,20 @@ Same harness → native resume (`claude --resume`, `codex resume`); different ha
 
 ## Why theirs is faster — three root causes
 
-1. **Zero-LLM handoff path.** Deterministic extraction from native stores takes milliseconds. memoria's good handoff artifact needs a `claude -p`/`codex exec` pass (detached, minutes, 10-min timeout) — if the user switches agents right after a session ends, the digest is still raw hook lines.
-2. **Push, not pull.** They prepend context so the model's first turn is already informed. memoria hands a path and burns the model's first turn on Read plus reconstruction from skeletal `@hook` lines (`@post-tool-use Bash 'go build'` says nothing about *why* or *what next*).
+1. **Zero-LLM handoff path.** Deterministic extraction from native stores takes milliseconds. memoria's good handoff artifact needed a `claude -p`/`codex exec` pass (detached, minutes, 10-min timeout) — if the user switches agents right after a session ends, the digest is still raw hook lines.
+2. **Push, not pull.** They prepend context so the model's first turn is already informed. memoria handed a path and burned the model's first turn on Read plus reconstruction from skeletal `@hook` lines (`@post-tool-use Bash 'go build'` says nothing about *why* or *what next*).
 3. **Capture fidelity.** They read the harness's complete transcript after the fact; memoria records its own lossy shadow of the session (whitespace-collapsed one-liners, only Write/Edit/Bash, assistant text only at `stop`).
 
 ## Trade-off and the key insight
 
-Their speed costs a daemon, SQLite, and parsers for 8 undocumented private store formats — fragile when harnesses update (they admit rename-project can't fix native stores). memoria stays daemon-free: plain markdown in the repo, human-readable, git-versioned ([[decisions/0001-plain-markdown-no-db]]). Their wiki consolidation is also LLM-driven and optional — the transferable insight is that ai-memory separates **handoff (deterministic, instant)** from **knowledge distillation (LLM, slow, async)**, while memoria currently routes both through the same slow LLM pipeline.
+Their speed costs a daemon, SQLite, and parsers for 8 undocumented private store formats — fragile when harnesses update (they admit rename-project can't fix native stores). memoria stays daemon-free: plain markdown in the repo, human-readable, git-versioned ([[decisions/0001-plain-markdown-no-db]]). Their wiki consolidation is also LLM-driven and optional — the transferable insight is that ai-memory separates **handoff (deterministic, instant)** from **knowledge distillation (LLM, slow, async)**, while memoria at research time routed both through the same slow LLM pipeline.
 
-## Candidate ideas (recorded, unimplemented)
+## Candidate ideas from the research, and what happened to them
 
-- Build the handoff packet by reading `~/.claude/projects/**/*.jsonl` / codex rollouts instead of memoria's digest.
-- Inject context via a SessionStart hook instead of a "read this file" prompt.
-- Add a workstream-style link id to `.memoria/sessions.md`.
+- Build the handoff packet by reading `~/.claude/projects/**/*.jsonl` / codex rollouts instead of memoria's digest — **not adopted**: the shipped packet is built from memoria's own digests.
+- Inject context via a SessionStart hook instead of a "read this file" prompt — **partially adopted**: content is now pushed, but as the agent's initial argv prompt rather than a SessionStart injection.
+- Add a workstream-style link id to `.memoria/sessions.md` — **not adopted**; re-flagged at the rework's close as the follow-up if packets still feel lossy.
+
+## Outcome: deterministic handoff packet shipped
+
+Commit `ad5d206` (2026-07-29, [[sessions/e915be64-f9af-4a50-a147-8a4831159754]]) replaced the one-sentence digest pointer with a self-contained packet built deterministically from memoria's own digests and delivered as the receiving agent's initial prompt: resume framing, source-harness provenance, git checkpoint, `continues_from` chain history oldest-first, and the wiki session page, all under a 24k-byte budget with the digest paths always named. That adopts the separation this research surfaced — handoff deterministic and instant, knowledge distillation LLM-driven and async — while staying daemon-free on plain markdown. Capture fidelity is unchanged (still memoria's own hook lines), and session linkage/delivery cursors remain unbuilt. Details in [[concepts/recall-and-run]].

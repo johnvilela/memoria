@@ -12,8 +12,9 @@ Long-term memory and a per-project wiki for code agents, built from their chat s
 - [[concepts/session-capture]] — hooks, live digests, implicit session end, incarnations
 - [[concepts/consolidation-pipeline]] — `process`, JSON proposal, lint, cron timer
 - [[concepts/mcp-server]] — the six MCP tools agents get
-- [[concepts/recall-and-run]] — bootstrap, AGENTS.md recall block, `run`'s session picker, `search`
-- [[concepts/handoff-vs-ai-memory]] — research: ai-memory's deterministic workstream handoff vs memoria's digest handoff
+- [[concepts/recall-and-run]] — bootstrap, AGENTS.md recall block, `run`'s session picker + cross-harness handoff packet, `search`
+- [[concepts/handoff-vs-ai-memory]] — research: ai-memory's deterministic workstream handoff vs memoria's — spawned the packet handoff (`ad5d206`)
+- [[research/ai-memory-workstream-comparison]] — external (chatgpt) deep-dive on ai-memory v1.19.2 that fed the `run` rework
 
 ## Decisions — why it's shaped this way
 
@@ -40,3 +41,5 @@ Long-term memory and a per-project wiki for code agents, built from their chat s
 - [[sessions/0075f9e5-98eb-4d2e-bd20-3e8f5c52b069]] — ai-memory research: why their handoff is faster
 - [[sessions/cf99acf5-2ee6-4118-90b5-1a2964766475]] — run rework committed: `0d9d968` via /git-commit
 - [[sessions/f99b3c0c-68d0-4132-a4b1-cc2538dc1ce7]] — ai-memory research prompt re-asked after /clear; no work captured
+- [[sessions/703f30e4-aabc-48d9-bf89-9bbd90d2428a]] — wiki research + session pages committed: `3252ce0`
+- [[sessions/e915be64-f9af-4a50-a147-8a4831159754]] — `run` handoff rebuilt: digest pointer → self-contained packet (`ad5d206`)
