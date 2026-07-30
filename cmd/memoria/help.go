@@ -22,8 +22,8 @@ type command struct {
 
 var commands = []command{
 	{name: "help", desc: "Show this help screen"},
-	{name: "init", desc: "Install code-agent hooks and choose the session processor (--client, --processor, --notification, --auto-apply, --cron)"},
-	{name: "setup", desc: "Reconfigure processor, notifications, auto-apply and schedule (--processor, --notification, --auto-apply, --cron [expr|off], --cron-apply)"},
+	{name: "init", desc: "Install hooks into one or more code agents and choose the session processor (--client a,b, --processor, --notification, --auto-apply, --cron)"},
+	{name: "setup", desc: "Reconfigure processor, notifications, auto-apply, schedule, or add hooks to more agents (--client a,b, --processor, --notification, --auto-apply, --cron [expr|off], --cron-apply)"},
 	{name: "process", desc: "Consolidate pending sessions into the project wiki in the background (review, then --apply; --inspect follows a running job; --all sweeps every project)"},
 	{name: "lint", desc: "Audit the wiki for contradictions in the background (--review, --apply a fix, --deny \"why\")"},
 	{name: "run", desc: "Launch a code agent here, continuing a previous session (--new, --session <id|name>; no flags → pick from the last 5)"},

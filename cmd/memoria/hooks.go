@@ -91,6 +91,23 @@ func installHooks(events map[string]string, settingsPath, binPath, client string
 	return os.WriteFile(settingsPath, append(out, '\n'), 0o644)
 }
 
+// detectClients returns agents whose settings file already carries memoria
+// hooks — backfills the config's clients list for pre-feature installs.
+// ponytail: substring check, not JSON parse — mirrors findMemoriaHook matching.
+func detectClients(home string) []string {
+	var found []string
+	for _, c := range []struct{ client, rel string }{
+		{"claude-code", filepath.Join(".claude", "settings.json")},
+		{"codex", filepath.Join(".codex", "hooks.json")},
+	} {
+		b, err := os.ReadFile(filepath.Join(home, c.rel))
+		if err == nil && strings.Contains(string(b), " hook session-start") {
+			found = append(found, c.client)
+		}
+	}
+	return found
+}
+
 // findMemoriaHook returns the hook map whose command runs `hook <name>`,
 // matching both the old bare form and the current --client form.
 func findMemoriaHook(entries []any, name string) map[string]any {

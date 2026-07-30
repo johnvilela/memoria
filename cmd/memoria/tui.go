@@ -90,6 +90,82 @@ var selectOption = func(title string, opts []option) (string, error) {
 	return m.choice, nil
 }
 
+type multiModel struct {
+	title   string
+	opts    []option
+	cursor  int
+	checked []bool
+	aborted bool
+}
+
+func (m multiModel) Init() tea.Cmd { return nil }
+
+func (m multiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if k, ok := msg.(tea.KeyMsg); ok {
+		switch k.String() {
+		case "up", "k":
+			if m.cursor > 0 {
+				m.cursor--
+			}
+		case "down", "j":
+			if m.cursor < len(m.opts)-1 {
+				m.cursor++
+			}
+		case " ":
+			m.checked[m.cursor] = !m.checked[m.cursor]
+		case "enter":
+			return m, tea.Quit
+		case "esc", "ctrl+c", "q":
+			m.aborted = true
+			return m, tea.Quit
+		}
+	}
+	return m, nil
+}
+
+func (m multiModel) View() string {
+	var b strings.Builder
+	b.WriteString(tuiTitle.Render(m.title) + "\n\n")
+	for i, o := range m.opts {
+		cursor := "  "
+		if i == m.cursor {
+			cursor = tuiCursor.Render("> ")
+		}
+		box := "[ ] "
+		if m.checked[i] {
+			box = "[x] "
+		}
+		line := o.label
+		if o.desc != "" {
+			line += " " + tuiFaint.Render("— "+o.desc)
+		}
+		b.WriteString(cursor + box + line + "\n")
+	}
+	b.WriteString(tuiFaint.Render("\n↑/↓ move · space toggle · enter confirm · esc cancel") + "\n")
+	return b.String()
+}
+
+// selectMulti runs an interactive multi-choice select and returns the checked
+// values in option order (nil when nothing was checked). Var so tests can
+// stub the picker.
+var selectMulti = func(title string, opts []option) ([]string, error) {
+	res, err := tea.NewProgram(multiModel{title: title, opts: opts, checked: make([]bool, len(opts))}).Run()
+	if err != nil {
+		return nil, err
+	}
+	m := res.(multiModel)
+	if m.aborted {
+		return nil, fmt.Errorf("aborted")
+	}
+	var vals []string
+	for i, o := range m.opts {
+		if m.checked[i] {
+			vals = append(vals, o.value)
+		}
+	}
+	return vals, nil
+}
+
 type secretModel struct {
 	input   textinput.Model
 	aborted bool

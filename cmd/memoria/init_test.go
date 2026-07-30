@@ -83,8 +83,96 @@ func TestInitNonTTYSkipsProcessor(t *testing.T) {
 	if !strings.Contains(out, "No processor configured") {
 		t.Fatalf("missing skip hint: %q", out)
 	}
-	if _, err := os.Stat(cfgPath); !os.IsNotExist(err) {
-		t.Fatalf("config written without --processor: %v", err)
+	cfg, err := loadConfig(cfgPath)
+	if err != nil {
+		t.Fatalf("config not written: %v", err)
+	}
+	if cfg.Processor != "" {
+		t.Fatalf("processor set without --processor: %+v", cfg)
+	}
+	if len(cfg.Clients) != 1 || cfg.Clients[0] != "claude-code" {
+		t.Fatalf("clients = %v, want [claude-code]", cfg.Clients)
+	}
+}
+
+func TestInitMultipleClients(t *testing.T) {
+	for _, args := range [][]string{
+		{"claude-code", "codex"},
+		{"--client", "claude-code,codex"},
+	} {
+		home, cfgPath := initEnv(t)
+		code, out := runInitCmd(t, args...)
+		if code != 0 {
+			t.Fatalf("init %v = %d: %s", args, code, out)
+		}
+		for _, rel := range []string{
+			filepath.Join(".claude", "settings.json"),
+			filepath.Join(".codex", "hooks.json"),
+			".claude.json",
+			filepath.Join(".codex", "config.toml"),
+		} {
+			if _, err := os.Stat(filepath.Join(home, rel)); err != nil {
+				t.Fatalf("init %v: %s missing: %v", args, rel, err)
+			}
+		}
+		cfg, _ := loadConfig(cfgPath)
+		if len(cfg.Clients) != 2 || cfg.Clients[0] != "claude-code" || cfg.Clients[1] != "codex" {
+			t.Fatalf("init %v: clients = %v, want [claude-code codex]", args, cfg.Clients)
+		}
+	}
+}
+
+func TestInitUnknownClientFailsFast(t *testing.T) {
+	home, _ := initEnv(t)
+	code, out := runInitCmd(t, "claude-code", "emacs")
+	if code != 1 || !strings.Contains(out, "emacs") {
+		t.Fatalf("init claude-code emacs: code=%d out=%q, want 1 naming emacs", code, out)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".claude", "settings.json")); !os.IsNotExist(err) {
+		t.Fatal("hooks installed despite unknown client in the list")
+	}
+}
+
+func TestInitClientAliasDedup(t *testing.T) {
+	_, cfgPath := initEnv(t)
+	code, out := runInitCmd(t, "claude", "claude-code")
+	if code != 0 {
+		t.Fatalf("init = %d: %s", code, out)
+	}
+	cfg, _ := loadConfig(cfgPath)
+	if len(cfg.Clients) != 1 || cfg.Clients[0] != "claude-code" {
+		t.Fatalf("clients = %v, want [claude-code] once", cfg.Clients)
+	}
+}
+
+func TestInitInteractiveMultiSelect(t *testing.T) {
+	origTTY, origMulti := isTTY, selectMulti
+	t.Cleanup(func() { isTTY, selectMulti = origTTY, origMulti })
+	isTTY = func() bool { return true }
+
+	home, cfgPath := initEnv(t)
+	stubSystemctl(t)
+	selectMulti = func(title string, opts []option) ([]string, error) {
+		return []string{"claude-code", "codex"}, nil
+	}
+	// remaining flags silence the other interactive prompts
+	code, out := runInitCmd(t, "--processor", "ollama", "--notification=false", "--auto-apply=false", "--cron", "off")
+	if code != 0 {
+		t.Fatalf("init = %d: %s", code, out)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".codex", "hooks.json")); err != nil {
+		t.Fatalf("codex hooks missing: %v", err)
+	}
+	cfg, _ := loadConfig(cfgPath)
+	if len(cfg.Clients) != 2 {
+		t.Fatalf("clients = %v, want both", cfg.Clients)
+	}
+
+	initEnv(t)
+	selectMulti = func(title string, opts []option) ([]string, error) { return nil, nil }
+	code, out = runInitCmd(t)
+	if code != 1 || !strings.Contains(out, "no agents selected") {
+		t.Fatalf("empty selection: code=%d out=%q, want 1 + message", code, out)
 	}
 }
 

@@ -22,6 +22,7 @@ type config struct {
 	Cron          string    `yaml:"cron,omitempty"`           // schedule input, verbatim (systemd timer runs process --all)
 	CronApply     bool      `yaml:"cron_apply,omitempty"`     // timer applies proposals without review
 	AutoApply     bool      `yaml:"auto_apply,omitempty"`     // autopilot: session end consolidates, proposals and lint fixes apply without review
+	Clients       []string  `yaml:"clients,omitempty"`        // agents with capture hooks installed
 }
 
 func loadConfig(path string) (config, error) {

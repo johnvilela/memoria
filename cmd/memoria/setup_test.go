@@ -112,6 +112,126 @@ func TestSetupSingleFlagSkipsPrompts(t *testing.T) {
 	}
 }
 
+func TestSetupClientFlagInstallsHooks(t *testing.T) {
+	home, cfgPath := initEnv(t)
+	if err := saveConfig(cfgPath, config{Processor: "ollama"}); err != nil {
+		t.Fatal(err)
+	}
+	// TTY on: --client must stay surgical, no prompts
+	orig := isTTY
+	isTTY = func() bool { return true }
+	t.Cleanup(func() { isTTY = orig })
+	code, out := runSetupCmd(t, "--client", "codex")
+	if code != 0 || strings.Contains(out, "aborted") {
+		t.Fatalf("setup --client codex: code=%d out=%q", code, out)
+	}
+	for _, rel := range []string{filepath.Join(".codex", "hooks.json"), filepath.Join(".codex", "config.toml")} {
+		if _, err := os.Stat(filepath.Join(home, rel)); err != nil {
+			t.Fatalf("%s missing: %v", rel, err)
+		}
+	}
+	cfg, _ := loadConfig(cfgPath)
+	if len(cfg.Clients) != 1 || cfg.Clients[0] != "codex" {
+		t.Fatalf("clients = %v, want [codex]", cfg.Clients)
+	}
+	if cfg.Processor != "ollama" {
+		t.Fatalf("processor changed: %+v", cfg)
+	}
+}
+
+func TestSetupClientFlagUnknown(t *testing.T) {
+	_, cfgPath := initEnv(t)
+	if err := saveConfig(cfgPath, config{Processor: "ollama"}); err != nil {
+		t.Fatal(err)
+	}
+	code, out := runSetupCmd(t, "--client", "emacs")
+	if code != 1 || !strings.Contains(out, "emacs") {
+		t.Fatalf("setup --client emacs: code=%d out=%q", code, out)
+	}
+}
+
+// stubSetupPrompts forces TTY and answers "keep" to every single-select.
+func stubSetupPrompts(t *testing.T, multi func(string, []option) ([]string, error)) {
+	t.Helper()
+	origTTY, origSel, origMulti := isTTY, selectOption, selectMulti
+	t.Cleanup(func() { isTTY, selectOption, selectMulti = origTTY, origSel, origMulti })
+	isTTY = func() bool { return true }
+	selectOption = func(title string, opts []option) (string, error) { return "keep", nil }
+	selectMulti = multi
+}
+
+func TestSetupInteractiveAddsAgent(t *testing.T) {
+	home, cfgPath := initEnv(t)
+	if err := saveConfig(cfgPath, config{Processor: "ollama", Clients: []string{"claude-code"}}); err != nil {
+		t.Fatal(err)
+	}
+	var gotOpts []option
+	stubSetupPrompts(t, func(title string, opts []option) ([]string, error) {
+		gotOpts = opts
+		return []string{"codex"}, nil
+	})
+	code, out := runSetupCmd(t)
+	if code != 0 {
+		t.Fatalf("setup = %d: %s", code, out)
+	}
+	if !strings.Contains(out, "installed for: claude-code") {
+		t.Fatalf("missing installed line: %q", out)
+	}
+	if len(gotOpts) != 1 || gotOpts[0].value != "codex" {
+		t.Fatalf("multi-select opts = %v, want only codex", gotOpts)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".codex", "hooks.json")); err != nil {
+		t.Fatalf("codex hooks missing: %v", err)
+	}
+	cfg, _ := loadConfig(cfgPath)
+	if len(cfg.Clients) != 2 {
+		t.Fatalf("clients = %v, want both", cfg.Clients)
+	}
+}
+
+func TestSetupInteractiveBackfill(t *testing.T) {
+	home, cfgPath := initEnv(t)
+	if err := saveConfig(cfgPath, config{Processor: "ollama"}); err != nil {
+		t.Fatal(err)
+	}
+	// pre-feature install: hooks on disk, nothing recorded in config
+	settings := filepath.Join(home, ".claude", "settings.json")
+	if err := os.MkdirAll(filepath.Dir(settings), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"/usr/bin/memoria hook session-start --client claude-code"}]}]}}`
+	if err := os.WriteFile(settings, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stubSetupPrompts(t, func(title string, opts []option) ([]string, error) { return nil, nil })
+	code, out := runSetupCmd(t)
+	if code != 0 {
+		t.Fatalf("setup = %d: %s", code, out)
+	}
+	if !strings.Contains(out, "installed for: claude-code") {
+		t.Fatalf("backfill not shown: %q", out)
+	}
+	cfg, _ := loadConfig(cfgPath)
+	if len(cfg.Clients) != 1 || cfg.Clients[0] != "claude-code" {
+		t.Fatalf("clients = %v, want backfilled [claude-code]", cfg.Clients)
+	}
+}
+
+func TestSetupAllInstalledSkipsMultiSelect(t *testing.T) {
+	_, cfgPath := initEnv(t)
+	if err := saveConfig(cfgPath, config{Processor: "ollama", Clients: []string{"claude-code", "codex"}}); err != nil {
+		t.Fatal(err)
+	}
+	stubSetupPrompts(t, func(title string, opts []option) ([]string, error) {
+		t.Fatal("multi-select shown with all agents installed")
+		return nil, nil
+	})
+	code, out := runSetupCmd(t)
+	if code != 0 {
+		t.Fatalf("setup = %d: %s", code, out)
+	}
+}
+
 func TestSetupCronSmoke(t *testing.T) {
 	_, cfgPath := initEnv(t)
 	if err := saveConfig(cfgPath, config{Processor: "ollama"}); err != nil {

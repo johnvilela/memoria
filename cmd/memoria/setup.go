@@ -5,17 +5,20 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
+	"strings"
 )
 
-// runSetup reconfigures an existing install: processor, notifications, cron.
-// Hooks stay init-only.
+// runSetup reconfigures an existing install: processor, notifications, cron,
+// and adds capture hooks for more agents without touching existing ones.
 func runSetup(args []string, configPath string, out io.Writer) int {
 	usage := func() {
-		fmt.Fprintln(out, "usage: memoria setup [--processor claude-code|codex|ollama|gemini] [--notification] [--auto-apply] [--cron <expr|preset|off>] [--cron-apply]")
+		fmt.Fprintln(out, "usage: memoria setup [--client claude-code,codex] [--processor claude-code|codex|ollama|gemini] [--notification] [--auto-apply] [--cron <expr|preset|off>] [--cron-apply]")
 	}
 	args = normalizeCronArgs(args)
 	fs := flag.NewFlagSet("setup", flag.ContinueOnError)
 	fs.SetOutput(out)
+	clientFlag := fs.String("client", "", "agents to add capture hooks for (comma-separated)")
 	processor := fs.String("processor", "", "AI provider that processes sessions")
 	notification := fs.Bool("notification", false, "desktop notification when background processing finishes")
 	autoApply := fs.Bool("auto-apply", false, "autopilot: session end consolidates and applies without review")
@@ -57,14 +60,42 @@ func runSetup(args []string, configPath string, out io.Writer) int {
 		}
 	}
 
+	var clients []string
+	if *clientFlag != "" {
+		if clients = splitClients(*clientFlag); len(clients) == 0 {
+			usage()
+			return 1
+		}
+	}
+
 	// any flag given = change exactly that, keep the rest — no prompts
-	anySet := *processor != "" || notifSet || autoSet || cronSet || cronApplySet
+	anySet := *clientFlag != "" || *processor != "" || notifSet || autoSet || cronSet || cronApplySet
 	if !anySet {
 		if !isTTY() {
 			usage()
 			return 1
 		}
 		aborted := func() int { fmt.Fprintln(out, "aborted"); return 1 }
+		home, _ := os.UserHomeDir()
+		installed := recordClients(configPath, out, detectClients(home)...)
+		list := "none"
+		if len(installed) > 0 {
+			list = strings.Join(installed, ", ")
+		}
+		fmt.Fprintln(out, "Capture hooks installed for:", list)
+		var missing []option
+		for _, o := range clientOptions {
+			if !slices.Contains(installed, o.value) {
+				missing = append(missing, o)
+			}
+		}
+		if len(missing) > 0 {
+			v, err := selectMulti("Add capture hooks for more agents?", missing)
+			if err != nil {
+				return aborted()
+			}
+			clients = v
+		}
 		if *processor == "" {
 			cur := cfg.Processor
 			if cur == "" {
@@ -123,6 +154,11 @@ func runSetup(args []string, configPath string, out io.Writer) int {
 		}
 	}
 
+	if len(clients) > 0 {
+		if code := installClients(clients, configPath, out, usage); code != 0 {
+			return code
+		}
+	}
 	if *processor != "" || notifSet || autoSet {
 		if code := saveInitConfig(*processor, *notification, notifSet, *autoApply, autoSet, configPath, out); code != 0 {
 			return code

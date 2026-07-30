@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 )
@@ -42,17 +43,17 @@ var autoApplyOptions = []option{
 
 func runInit(args []string, configPath string, out io.Writer) int {
 	usage := func() {
-		fmt.Fprintln(out, "usage: memoria init [<client>] [--client claude-code|codex] [--processor claude-code|codex|ollama|gemini] [--notification] [--auto-apply] [--cron [<expr|preset|off>]] [--cron-apply]")
+		fmt.Fprintln(out, "usage: memoria init [<client>...] [--client claude-code,codex] [--processor claude-code|codex|ollama|gemini] [--notification] [--auto-apply] [--cron [<expr|preset|off>]] [--cron-apply]")
 	}
 	args = normalizeCronArgs(args)
-	// positional client only as the first arg, so flags after it still parse
-	client := ""
-	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
-		client, args = args[0], args[1:]
+	// positional clients only as leading args, so flags after them still parse
+	var clients []string
+	for len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		clients, args = append(clients, args[0]), args[1:]
 	}
 	fs := flag.NewFlagSet("init", flag.ContinueOnError)
 	fs.SetOutput(out)
-	clientFlag := fs.String("client", "", "agent to install capture hooks for")
+	clientFlag := fs.String("client", "", "agents to install capture hooks for (comma-separated)")
 	processor := fs.String("processor", "", "AI provider that processes sessions")
 	notification := fs.Bool("notification", false, "desktop notification when background processing finishes")
 	autoApply := fs.Bool("auto-apply", false, "autopilot: session end consolidates and applies without review")
@@ -75,12 +76,15 @@ func runInit(args []string, configPath string, out io.Writer) int {
 			cronApplySet = true
 		}
 	})
-	if fs.NArg() > 0 || (client != "" && *clientFlag != "") {
+	if fs.NArg() > 0 || (len(clients) > 0 && *clientFlag != "") {
 		usage()
 		return 1
 	}
 	if *clientFlag != "" {
-		client = *clientFlag
+		if clients = splitClients(*clientFlag); len(clients) == 0 {
+			usage()
+			return 1
+		}
 	}
 	if *processor != "" {
 		if _, known := processorBins[*processor]; !known {
@@ -88,19 +92,23 @@ func runInit(args []string, configPath string, out io.Writer) int {
 			return 1
 		}
 	}
-	if client == "" {
+	if len(clients) == 0 {
 		if !isTTY() {
 			usage()
 			return 1
 		}
-		v, err := selectOption("Install capture hooks for which agent?", clientOptions)
+		v, err := selectMulti("Install capture hooks for which agents?", clientOptions)
 		if err != nil {
 			fmt.Fprintln(out, "aborted")
 			return 1
 		}
-		client = v
+		if len(v) == 0 {
+			fmt.Fprintln(out, "no agents selected")
+			return 1
+		}
+		clients = v
 	}
-	if code := installClientHooks(client, out, usage); code != 0 {
+	if code := installClients(clients, configPath, out, usage); code != 0 {
 		return code
 	}
 	ensureGitignore(out)
@@ -250,6 +258,76 @@ func saveInitConfig(proc string, notifEnabled, notifSet, autoEnabled, autoSet bo
 		fmt.Fprintf(out, "Auto-apply %s in %s\n", state, configPath)
 	}
 	return 0
+}
+
+// splitClients parses a comma-separated --client value, dropping empties.
+func splitClients(s string) []string {
+	var names []string
+	for _, n := range strings.Split(s, ",") {
+		if n = strings.TrimSpace(n); n != "" {
+			names = append(names, n)
+		}
+	}
+	return names
+}
+
+// normalizeClient maps accepted names/aliases to canonical; "" = unknown.
+func normalizeClient(name string) string {
+	switch name {
+	case "claude", "claude-code":
+		return "claude-code"
+	case "codex":
+		return "codex"
+	}
+	return ""
+}
+
+// installClients validates all names first (fail fast — a typo installs
+// nothing), then installs hooks+MCP per agent and records them in the config.
+func installClients(names []string, configPath string, out io.Writer, usage func()) int {
+	var clients []string
+	for _, n := range names {
+		c := normalizeClient(n)
+		if c == "" {
+			fmt.Fprintf(out, "unknown client: %q\n", n)
+			usage()
+			return 1
+		}
+		if !slices.Contains(clients, c) {
+			clients = append(clients, c)
+		}
+	}
+	for _, c := range clients {
+		if code := installClientHooks(c, out, usage); code != 0 {
+			return code
+		}
+	}
+	recordClients(configPath, out, clients...)
+	return 0
+}
+
+// recordClients merges names into the config's clients list and returns the
+// merged list. Save failure is a warning only — the hooks are the real
+// effect; detectClients backfill recovers the record later.
+func recordClients(configPath string, out io.Writer, names ...string) []string {
+	cfg, err := loadConfig(configPath)
+	if err != nil && !os.IsNotExist(err) {
+		fmt.Fprintln(out, "warning: could not record clients:", err)
+		return names
+	}
+	changed := false
+	for _, n := range names {
+		if !slices.Contains(cfg.Clients, n) {
+			cfg.Clients = append(cfg.Clients, n)
+			changed = true
+		}
+	}
+	if changed {
+		if err := saveConfig(configPath, cfg); err != nil {
+			fmt.Fprintln(out, "warning: could not record clients:", err)
+		}
+	}
+	return cfg.Clients
 }
 
 // installClientHooks wires memoria into the chosen agent's global settings.
