@@ -13,7 +13,7 @@ import (
 	"strings"
 )
 
-//go:embed lint-prompt.md
+//go:embed prompts/lint-prompt.md
 var defaultLintPrompt string
 
 // appended by Go, never stored in the editable prompt file, so user edits

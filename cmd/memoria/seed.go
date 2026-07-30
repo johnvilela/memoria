@@ -11,7 +11,7 @@ import (
 	"strings"
 )
 
-//go:embed seed-prompt.md
+//go:embed prompts/seed-prompt.md
 var defaultSeedPrompt string
 
 var seedOptions = []option{

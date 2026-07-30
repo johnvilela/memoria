@@ -11,7 +11,7 @@ import (
 	"strings"
 )
 
-//go:embed digest-prompt.md
+//go:embed prompts/digest-prompt.md
 var defaultDigestPrompt string
 
 // runDigest compiles one session's digest into a clean episodic page at

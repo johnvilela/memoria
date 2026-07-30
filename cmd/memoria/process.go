@@ -18,7 +18,7 @@ import (
 	"time"
 )
 
-//go:embed wiki-prompt.md
+//go:embed prompts/wiki-prompt.md
 var defaultWikiPrompt string
 
 // appended by Go, never stored in the editable prompt file, so user edits
