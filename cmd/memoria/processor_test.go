@@ -56,7 +56,12 @@ func stubProcessorBin(t *testing.T, name string) {
 // trusted by codex natively, so it runs there without --skip-git-repo-check.
 func TestInvokeProcessorCodexGitRepoTrusted(t *testing.T) {
 	stubProcessorBin(t, "codex")
-	proj := t.TempDir()
+	// EvalSymlinks so the expectation matches the child's $PWD: on macOS
+	// t.TempDir() hands back /var/... but the resolved cwd is /private/var/...
+	proj, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := os.Mkdir(filepath.Join(proj, ".git"), 0o755); err != nil {
 		t.Fatal(err)
 	}

@@ -11,14 +11,18 @@ import (
 	"testing"
 )
 
-// isolates HOME and XDG_CONFIG_HOME so init never touches real settings/config
+// isolates HOME and XDG_CONFIG_HOME so init never touches real settings/config.
+// The config path is resolved the same way the commands do (defaultConfigPath),
+// so tests agree with production on every OS — on macOS os.UserConfigDir()
+// ignores XDG_CONFIG_HOME and lands under HOME/Library, so a hardcoded XDG path
+// would point somewhere the commands never read.
 func initEnv(t *testing.T) (home, configPath string) {
 	t.Helper()
 	home = t.TempDir()
 	cfgDir := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", cfgDir)
-	return home, filepath.Join(cfgDir, "memoria", "config.yaml")
+	return home, defaultConfigPath()
 }
 
 func runInitCmd(t *testing.T, args ...string) (int, string) {
