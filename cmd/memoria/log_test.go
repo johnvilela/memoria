@@ -21,6 +21,7 @@ func TestMain(m *testing.M) {
 	}
 	notifyCmd = func(title, body string) error { return nil } // never shell out to notify-send
 	runSystemctl = func(args ...string) error { return nil }  // never touch the real systemd
+	runLaunchctl = func(args ...string) error { return nil }  // never touch the real launchd
 	os.Exit(m.Run())
 }
 

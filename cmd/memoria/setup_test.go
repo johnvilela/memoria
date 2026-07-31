@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -238,13 +239,23 @@ func TestSetupCronSmoke(t *testing.T) {
 		t.Fatal(err)
 	}
 	stubSystemctl(t)
+	stubLaunchctl(t)
 	code, out := runSetupCmd(t, "--cron", "0 8 * * *")
 	if code != 0 {
 		t.Fatalf("setup = %d: %s", code, out)
 	}
-	tmr, err := os.ReadFile(filepath.Join(unitDir(cfgPath), "memoria-process.timer"))
-	if err != nil || !strings.Contains(string(tmr), "OnCalendar=*-*-* 08:00:00") {
-		t.Fatalf("timer = %q, %v", tmr, err)
+	// the schedule artifact is OS-native: systemd timer on linux, launchd plist
+	// on macOS. Both encode "08:00 daily".
+	if runtime.GOOS == "darwin" {
+		plist, err := os.ReadFile(agentPlist(t))
+		if err != nil || !strings.Contains(string(plist), "<integer>8</integer>") {
+			t.Fatalf("plist = %q, %v", plist, err)
+		}
+	} else {
+		tmr, err := os.ReadFile(filepath.Join(unitDir(cfgPath), "memoria-process.timer"))
+		if err != nil || !strings.Contains(string(tmr), "OnCalendar=*-*-* 08:00:00") {
+			t.Fatalf("timer = %q, %v", tmr, err)
+		}
 	}
 	cfg, _ := loadConfig(cfgPath)
 	if cfg.Cron != "0 8 * * *" {

@@ -32,6 +32,18 @@ func stubSelect(t *testing.T, value string) *[]option {
 	return &seen
 }
 
+// stubPathBin drops an executable named bin on a temp PATH so exec.LookPath
+// resolves it, keeping native-resume tests hermetic (no reliance on a real
+// /usr/bin/claude, which exists on some Linux boxes but not on macOS).
+func stubPathBin(t *testing.T, bin string) {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, bin), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
 func stubAgent(t *testing.T, exit int) *agentCall {
 	t.Helper()
 	var call agentCall
@@ -331,9 +343,10 @@ func TestRunDefaultPickerNativeResume(t *testing.T) {
 	writeRunDigest(t, proj, "pending", "bbb-222.md", "claude-code")
 	stubTTY(t, true)
 	stubSelect(t, "bbb-222")
+	stubPathBin(t, "claude")
 	call := stubAgent(t, 0)
 	var buf bytes.Buffer
-	if code := runRun(proj, cfgPath, []string{"/usr/bin/claude"}, &buf); code != 0 {
+	if code := runRun(proj, cfgPath, []string{"claude"}, &buf); code != 0 {
 		t.Fatalf("run = %d: %s", code, buf.String())
 	}
 	if len(call.args) != 2 || call.args[0] != "--resume" || call.args[1] != "bbb-222" {
@@ -359,9 +372,10 @@ func TestRunDigestlessNativeResume(t *testing.T) {
 	proj, cfgPath := runFixture(t)
 	stubTTY(t, true)
 	stubSelect(t, "aaa-111") // no digest in fixture
+	stubPathBin(t, "claude")
 	call := stubAgent(t, 0)
 	var buf bytes.Buffer
-	if code := runRun(proj, cfgPath, []string{"/usr/bin/claude"}, &buf); code != 0 {
+	if code := runRun(proj, cfgPath, []string{"claude"}, &buf); code != 0 {
 		t.Fatalf("run = %d: %s", code, buf.String())
 	}
 	if len(call.args) != 2 || call.args[0] != "--resume" || call.args[1] != "aaa-111" {
