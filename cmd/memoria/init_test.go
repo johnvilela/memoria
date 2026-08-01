@@ -412,3 +412,55 @@ func TestInitAutoApplyFlag(t *testing.T) {
 		t.Fatal("auto_apply enabled without the flag")
 	}
 }
+
+func TestEnsurePathEnvAppendsShellRC(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("SHELL", "/bin/zsh")
+	t.Setenv("PATH", "/usr/bin") // the test binary's dir is never here
+	var buf bytes.Buffer
+	ensurePathEnv(&buf)
+	rc := filepath.Join(home, ".zshrc")
+	data, err := os.ReadFile(rc)
+	if err != nil {
+		t.Fatalf("rc not written: %v", err)
+	}
+	if !strings.Contains(string(data), "export PATH=") {
+		t.Fatalf("no export line in %s: %q", rc, data)
+	}
+	if !strings.Contains(buf.String(), "added") {
+		t.Fatalf("no user message, got %q", buf.String())
+	}
+
+	ensurePathEnv(&buf) // rerun must not duplicate the line
+	if again, _ := os.ReadFile(rc); !bytes.Equal(again, data) {
+		t.Fatalf("rc changed on rerun:\n%s", again)
+	}
+
+	exeDir := filepath.Dir(os.Args[0])
+	if exe, err := os.Executable(); err == nil {
+		exeDir = filepath.Dir(exe)
+	}
+	t.Setenv("PATH", exeDir) // already on PATH → untouched rc
+	home2 := t.TempDir()
+	t.Setenv("HOME", home2)
+	ensurePathEnv(&buf)
+	if _, err := os.Stat(filepath.Join(home2, ".zshrc")); !os.IsNotExist(err) {
+		t.Fatal("rc written although dir already on PATH")
+	}
+}
+
+func TestShellRC(t *testing.T) {
+	home := "/home/u"
+	for _, tt := range []struct{ shell, dir, rc, line string }{
+		{"/bin/zsh", "/home/u/bin", "/home/u/.zshrc", `export PATH="$HOME/bin:$PATH"`},
+		{"/bin/bash", "/home/u/bin", "/home/u/.bashrc", `export PATH="$HOME/bin:$PATH"`},
+		{"/usr/bin/fish", "/home/u/bin", "/home/u/.config/fish/config.fish", `fish_add_path "$HOME/bin"`},
+		{"", "/opt/bin", "/home/u/.profile", `export PATH="/opt/bin:$PATH"`},
+	} {
+		rc, line := shellRC(tt.shell, home, tt.dir)
+		if rc != tt.rc || line != tt.line {
+			t.Errorf("shellRC(%q, %q) = %q, %q; want %q, %q", tt.shell, tt.dir, rc, line, tt.rc, tt.line)
+		}
+	}
+}

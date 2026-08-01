@@ -1,4 +1,4 @@
-module github.com/jv77/memoria
+module github.com/johnvilela/memoria
 
 go 1.25.0
 

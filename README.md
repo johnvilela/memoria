@@ -9,14 +9,19 @@ Inspired by Fabio Akita's ai-memory and Andrej Karpathy's LLM wiki idea.
 ## Install
 
 ```sh
-go install github.com/jv77/memoria/cmd/memoria@latest
+curl -sS https://raw.githubusercontent.com/johnvilela/memoria/main/scripts/install.sh | sh
 ```
 
-Or from a local checkout:
+The script detects your OS and shell, installs the binary to `~/.local/bin` (needs Go), then runs `memoria init` — which itself adapts to the platform (systemd timer on Linux, launchd agent on macOS) and to the agents it finds installed (Claude Code, Codex).
+
+Or manually:
 
 ```sh
+go install github.com/johnvilela/memoria/cmd/memoria@latest
+
+# or from a local checkout:
 scripts/build.sh        # builds ./memoria
-scripts/install.sh      # installs to ~/.local/bin
+scripts/install.sh      # installs to ~/.local/bin + runs init
 ```
 
 ## Quick start

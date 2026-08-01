@@ -112,6 +112,7 @@ func runInit(args []string, configPath string, out io.Writer) int {
 		return code
 	}
 	ensureGitignore(out)
+	ensurePathEnv(out)
 
 	if *processor == "" && isTTY() {
 		v, err := selectOption("Which provider should process sessions into wiki/memories?", processorOptions)
@@ -173,6 +174,62 @@ func ensureGitignore(out io.Writer) {
 	}
 	if err := addGitignoreEntry(cwd); err != nil {
 		fmt.Fprintln(out, "warning: could not update .gitignore:", err)
+	}
+}
+
+// ensurePathEnv puts the directory holding the running binary on PATH for
+// future shells: when missing, appends the export line to the rc file of the
+// user's shell ($SHELL). macOS zsh lacks ~/.local/bin by default, so a bare
+// `memoria` in a new terminal fails right after install without this.
+// Best-effort: init never fails over it.
+func ensurePathEnv(out io.Writer) {
+	exe, err := os.Executable()
+	if err != nil {
+		return
+	}
+	dir := filepath.Dir(exe)
+	if slices.Contains(filepath.SplitList(os.Getenv("PATH")), dir) {
+		return
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+	rc, line := shellRC(os.Getenv("SHELL"), home, dir)
+	data, _ := os.ReadFile(rc)
+	if strings.Contains(string(data), line) {
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(rc), 0o755); err != nil {
+		return
+	}
+	f, err := os.OpenFile(rc, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		fmt.Fprintf(out, "note: %s is not on your PATH and %s could not be updated: %v\n", dir, rc, err)
+		return
+	}
+	defer f.Close()
+	fmt.Fprintf(f, "\n%s\n", line)
+	fmt.Fprintf(out, "added %s to PATH in %s — restart your shell to pick it up\n", dir, rc)
+}
+
+// shellRC picks the rc file and PATH line for a $SHELL value. dir under $HOME
+// is written home-relative so the line survives a moved home directory.
+// ponytail: bash on macOS reads .bash_profile, not .bashrc — macOS default is
+// zsh, revisit if a bash-on-mac report shows up.
+func shellRC(shell, home, dir string) (rc, line string) {
+	if rel, err := filepath.Rel(home, dir); err == nil && !strings.HasPrefix(rel, "..") {
+		dir = "$HOME/" + filepath.ToSlash(rel)
+	}
+	switch filepath.Base(shell) {
+	case "fish":
+		return filepath.Join(home, ".config", "fish", "config.fish"), fmt.Sprintf("fish_add_path %q", dir)
+	case "zsh":
+		return filepath.Join(home, ".zshrc"), fmt.Sprintf("export PATH=%q", dir+":$PATH")
+	case "bash":
+		return filepath.Join(home, ".bashrc"), fmt.Sprintf("export PATH=%q", dir+":$PATH")
+	default:
+		return filepath.Join(home, ".profile"), fmt.Sprintf("export PATH=%q", dir+":$PATH")
 	}
 }
 

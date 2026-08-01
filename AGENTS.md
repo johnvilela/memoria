@@ -19,7 +19,7 @@ Differentiator vs. existing solutions: hooks + cronjobs + markdown files, human-
 - Go, entrypoint in `cmd/memoria/` (no Go files in repo root); build with `go build -o memoria ./cmd/memoria`
 - CLI dispatch: stdlib `os.Args` switch — no cobra/urfave
 - TUI/styling: charmbracelet/lipgloss + bubbletea/bubbles (interactive selects and inputs live in `tui.go`)
-- Module: `github.com/jv77/memoria`
+- Module: `github.com/johnvilela/memoria`
 
 ## Conventions
 
