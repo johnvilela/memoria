@@ -42,30 +42,29 @@ func loadStatus(path string) (map[string]procStatus, error) {
 // statusSet records a state transition. "running" starts a fresh entry;
 // "done"/"error" stamp finished_at + detail and keep pid/started_at.
 func statusSet(path, projName, state string, pid int, detail string) error {
-	st, err := loadStatus(path)
-	if err != nil {
-		return err
-	}
-	now := time.Now().Format(time.RFC3339)
-	e := st[projName]
-	e.State = state
-	e.Detail = detail
-	if state == "running" {
-		e.PID = pid
-		e.StartedAt = now
-		e.FinishedAt = ""
-	} else {
-		e.FinishedAt = now
-	}
-	st[projName] = e
-	b, err := yaml.Marshal(st)
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	return os.WriteFile(path, b, 0o644)
+	return withFlock(path, func() error {
+		st, err := loadStatus(path)
+		if err != nil {
+			return err
+		}
+		now := time.Now().Format(time.RFC3339)
+		e := st[projName]
+		e.State = state
+		e.Detail = detail
+		if state == "running" {
+			e.PID = pid
+			e.StartedAt = now
+			e.FinishedAt = ""
+		} else {
+			e.FinishedAt = now
+		}
+		st[projName] = e
+		b, err := yaml.Marshal(st)
+		if err != nil {
+			return err
+		}
+		return writeFileAtomic(path, b)
+	})
 }
 
 // runLogPath is where a project's detached run writes its stdout/stderr,

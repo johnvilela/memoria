@@ -1,10 +1,12 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -133,6 +135,28 @@ func TestQueueRemove(t *testing.T) {
 	// absent entry: no-op
 	if err := queueRemove(q, "ghost", "/nope.md"); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestQueueConcurrentAdds(t *testing.T) {
+	q := filepath.Join(t.TempDir(), "pending.yaml")
+	var wg sync.WaitGroup
+	for i := range 20 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := queueAdd(q, "memoria", fmt.Sprintf("/p/%d.md", i)); err != nil {
+				t.Error(err)
+			}
+		}()
+	}
+	wg.Wait()
+	loaded, err := loadQueue(q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded["memoria"]) != 20 {
+		t.Fatalf("lost updates: want 20 entries, got %d", len(loaded["memoria"]))
 	}
 }
 
