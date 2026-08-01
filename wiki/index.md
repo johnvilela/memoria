@@ -59,3 +59,4 @@ Long-term memory and a per-project wiki for code agents, built from their chat s
 - [[sessions/019fb0d1-0ea2-71c3-a0c2-616d5973374c]] — deferred wiki commit lands as `4d9171a` over a fourth packet handoff; recall question answered write-free
 - [[sessions/e112664f-9954-4d8e-8fd2-a11e13d66bc0]] — handoff made ask-first (`6414c80`); multirepo assessment for eparts, adaptations committed as `31b7251` in incarnation 2
 - [[sessions/c133e40b-8547-4a99-bc98-d14b7029ccfe]] — codex git-trust fix, processor model config, wiki auto-commit — `dc9c30f` + `f0bf53a`
+- [[sessions/44c49197-2dea-4615-8ec2-27849c744218]] — open wiki folders with drop-and-warn validation (`06c9311`)
