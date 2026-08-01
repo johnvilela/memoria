@@ -36,7 +36,7 @@ Start with [[concepts/architecture-overview]] for the pipeline end to end.
 - [[gotchas/implicit-session-end]] — a new session ends the previous one; reopens spawn incarnations
 - [[gotchas/prompt-over-stdin-argv-limit]] — processor prompt goes over stdin (E2BIG)
 - [[gotchas/stale-prompt-overrides]] — old materialized prompt files silently pin prompts
-- [[gotchas/module-path-mismatch-breaks-go-install]] — fix `go.mod` path before tagging a release
+- [[gotchas/module-path-mismatch-breaks-go-install]] — go.mod path mismatch breaks install; fixed in `0e9c164`
 - [[gotchas/auto-apply-rewrites-wiki-mid-session]] — background auto-apply consolidation can modify `wiki/` while a session is running
 - [[gotchas/subagent-stop-promoted-to-user-request]] — handoff auto-ran a subagent's internal note; ask-first since `6414c80`
 - [[gotchas/codex-refuses-untrusted-directories]] — codex exec refuses to run outside git repos or trusted paths; fixed in `dc9c30f`
@@ -63,3 +63,5 @@ Start with [[concepts/architecture-overview]] for the pipeline end to end.
 - [[sessions/c133e40b-8547-4a99-bc98-d14b7029ccfe]] — codex git-trust fix, processor model config, wiki auto-commit — `dc9c30f` + `f0bf53a`
 - [[sessions/44c49197-2dea-4615-8ec2-27849c744218]] — open wiki folders with drop-and-warn validation (`06c9311`)
 - [[sessions/16f159dc-d22a-413f-a3e4-c02ceb22b9cc]] — queue write race condition fixed with file locking (`0f961a7`)
+- [[sessions/756f94c9-e579-493d-a839-76f7fa29eab3.md]] — first release: v0.7.0 tagged, `memoria version` subcommand, release ritual documented
+- [[sessions/29f4cf2e-fb32-47d3-9fb3-595ab07b17e7]] — curl installer script, init PATH detection, module-path mismatch fixed — `0e9c164`
