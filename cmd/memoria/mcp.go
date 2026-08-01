@@ -352,7 +352,7 @@ func addDeletedTag(content string) string {
 // runMCP serves the memoria tools over stdio. stdout belongs to the protocol:
 // diagnostics go to the file log only.
 func runMCP(configPath string, out io.Writer) int {
-	srv := mcp.NewServer(&mcp.Implementation{Name: "memoria", Version: "0.1"}, nil)
+	srv := mcp.NewServer(&mcp.Implementation{Name: "memoria", Version: version}, nil)
 	cwd := func() (string, error) { return os.Getwd() }
 
 	type searchIn struct {

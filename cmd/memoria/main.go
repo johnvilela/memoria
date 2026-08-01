@@ -7,6 +7,9 @@ import (
 	"os"
 )
 
+// version is bumped by hand on release, together with the matching git tag.
+const version = "0.7.0"
+
 func run(args []string, stdin io.Reader, out io.Writer) int {
 	arg := ""
 	if len(args) > 0 {
@@ -15,6 +18,9 @@ func run(args []string, stdin io.Reader, out io.Writer) int {
 	switch arg {
 	case "", "help", "--help", "-h":
 		fmt.Fprintln(out, renderHelp())
+		return 0
+	case "version", "--version", "-v":
+		fmt.Fprintln(out, "memoria "+version)
 		return 0
 	case "init":
 		return runInit(args[1:], defaultConfigPath(), out)
