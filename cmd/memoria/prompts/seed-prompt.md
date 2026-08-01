@@ -34,6 +34,8 @@ don't paper over it.
   - `decisions/0001-<slug>.md` — ADR-shaped commits with
     incrementing IDs (`0001-`, `0002-`, …)
   - `gotchas/<slug>.md` — failure modes / surprises
+  - These are the only valid top-level folders when seeding —
+    do not invent others.
 - Cite the source briefly inside the body (e.g. 'From commit
   abc1234:' or 'README §Quick start says...') so future readers
   can audit.

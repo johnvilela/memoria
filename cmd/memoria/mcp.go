@@ -40,7 +40,7 @@ type mcpJobOut struct {
 }
 
 type mcpWritePageIn struct {
-	Path         string   `json:"path" jsonschema:"wiki-relative path: index.md or under concepts/, decisions/, gotchas/, rules/ or sessions/, ending in .md"`
+	Path         string   `json:"path" jsonschema:"wiki-relative path ending in .md: index.md, under the suggested concepts/, decisions/, gotchas/, rules/ or sessions/, or under an existing top-level wiki folder; trash/, _global/ and dot-folders are reserved"`
 	Title        string   `json:"title" jsonschema:"short page title"`
 	BodyMarkdown string   `json:"body_markdown" jsonschema:"markdown body without frontmatter"`
 	Tags         []string `json:"tags,omitempty" jsonschema:"0-5 short kebab-case tags"`
@@ -260,8 +260,8 @@ func mcpWritePage(cwd, configPath string, in mcpWritePageIn) (mcpWriteOut, error
 		return mcpWriteOut{}, err
 	}
 	page := wikiPage{Path: in.Path, Title: in.Title, BodyMarkdown: in.BodyMarkdown, Tags: in.Tags}
-	if err := validatePages([]wikiPage{page}); err != nil {
-		return mcpWriteOut{}, err
+	if valid, dropped := validatePages([]wikiPage{page}, wikiRoot); len(valid) == 0 {
+		return mcpWriteOut{}, errors.New(dropped[0])
 	}
 	dst := filepath.Join(wikiRoot, filepath.FromSlash(in.Path))
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
@@ -279,13 +279,24 @@ func mcpDeletePage(cwd, configPath, pagePath string) (mcpDeleteOut, error) {
 	if err != nil {
 		return mcpDeleteOut{}, err
 	}
-	if !validPagePath(pagePath) {
+	if !validPagePath(pagePath, wikiDirs(wikiRoot)) {
 		return mcpDeleteOut{}, fmt.Errorf("page path %q outside the wiki structure", pagePath)
 	}
+	dst, err := trashPage(wikiRoot, pagePath)
+	if err != nil {
+		return mcpDeleteOut{}, err
+	}
+	logf("mcp", "trashed %s → %s", pagePath, dst)
+	return mcpDeleteOut{Path: dst, Deleted: true}, nil
+}
+
+// trashPage moves wikiRoot/<pagePath> to trash/ with a deleted tag, returning
+// the trash-relative destination ("trash/<rel>", -2/-3 suffix on collision).
+func trashPage(wikiRoot, pagePath string) (string, error) {
 	src := filepath.Join(wikiRoot, filepath.FromSlash(pagePath))
 	b, err := os.ReadFile(src)
 	if err != nil {
-		return mcpDeleteOut{}, fmt.Errorf("page %q not found", pagePath)
+		return "", fmt.Errorf("page %q not found", pagePath)
 	}
 	rel := pagePath
 	dst := filepath.Join(wikiRoot, "trash", filepath.FromSlash(rel))
@@ -297,16 +308,15 @@ func mcpDeletePage(cwd, configPath, pagePath string) (mcpDeleteOut, error) {
 		dst = filepath.Join(wikiRoot, "trash", filepath.FromSlash(rel))
 	}
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-		return mcpDeleteOut{}, err
+		return "", err
 	}
 	if err := os.WriteFile(dst, []byte(addDeletedTag(string(b))), 0o644); err != nil {
-		return mcpDeleteOut{}, err
+		return "", err
 	}
 	if err := os.Remove(src); err != nil {
-		return mcpDeleteOut{}, err
+		return "", err
 	}
-	logf("mcp", "trashed %s → trash/%s", pagePath, rel)
-	return mcpDeleteOut{Path: "trash/" + rel, Deleted: true}, nil
+	return "trash/" + rel, nil
 }
 
 // addDeletedTag marks a trashed page in its frontmatter tags, creating the

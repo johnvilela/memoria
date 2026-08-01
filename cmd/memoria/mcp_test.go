@@ -136,13 +136,26 @@ func TestMCPWritePage(t *testing.T) {
 	for _, bad := range []mcpWritePageIn{
 		{Path: "../evil.md", Title: "x", BodyMarkdown: "y"},
 		{Path: "/abs.md", Title: "x", BodyMarkdown: "y"},
-		{Path: "notes/x.md", Title: "x", BodyMarkdown: "y"},
+		{Path: "notes/x.md", Title: "x", BodyMarkdown: "y"}, // folder does not exist
 		{Path: "trash/x.md", Title: "x", BodyMarkdown: "y"},
+		{Path: "_global/x.md", Title: "x", BodyMarkdown: "y"},
+		{Path: ".obsidian/x.md", Title: "x", BodyMarkdown: "y"},
 		{Path: "concepts/x.md", Title: "", BodyMarkdown: ""},
 	} {
 		if _, err := mcpWritePage(proj, cfgPath, bad); err == nil {
 			t.Fatalf("bad input accepted: %+v", bad)
 		}
+	}
+	// existing custom folder is a valid target
+	if err := os.MkdirAll(filepath.Join(proj, "wiki", "research"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	res, err = mcpWritePage(proj, cfgPath, mcpWritePageIn{Path: "research/x.md", Title: "X", BodyMarkdown: "# X\n"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Path != "research/x.md" || !res.Written {
+		t.Fatalf("res = %+v", res)
 	}
 }
 

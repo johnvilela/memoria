@@ -150,6 +150,56 @@ func TestProcessRejectsBadPages(t *testing.T) {
 	}
 }
 
+func TestProcessDropsInvalidPagesKeepsRest(t *testing.T) {
+	proj, cfgPath, _ := processFixture(t)
+	stubProcessor(t, `{"pages":[
+		{"path":"concepts/queue.md","title":"Queue","body_markdown":"# Queue\n"},
+		{"path":"secrets/x.md","title":"x","body_markdown":"y"}
+	]}`, nil)
+	var buf bytes.Buffer
+	if code := runProcess(proj, cfgPath, []string{"--foreground"}, &buf); code != 0 {
+		t.Fatalf("process = %d: %s", code, buf.String())
+	}
+	var p proposal
+	b, err := os.ReadFile(filepath.Join(proj, ".memoria", "proposal.json"))
+	if err != nil {
+		t.Fatalf("proposal not written: %v", err)
+	}
+	if err := json.Unmarshal(b, &p); err != nil {
+		t.Fatal(err)
+	}
+	if len(p.Pages) != 1 || p.Pages[0].Path != "concepts/queue.md" {
+		t.Fatalf("pages = %+v, want only concepts/queue.md", p.Pages)
+	}
+	if !strings.Contains(buf.String(), "warning:") || !strings.Contains(buf.String(), "secrets/x.md") {
+		t.Fatalf("warning missing: %s", buf.String())
+	}
+	st, _ := os.ReadFile(statusPath(cfgPath))
+	if !strings.Contains(string(st), "dropped") {
+		t.Fatalf("status detail missing dropped note: %s", st)
+	}
+}
+
+func TestProcessCustomFolderTarget(t *testing.T) {
+	proj, cfgPath, _ := processFixture(t)
+	if err := os.MkdirAll(filepath.Join(proj, "wiki", "research"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	stubProcessor(t, `{"pages":[{"path":"research/notes.md","title":"Notes","body_markdown":"# Notes\n"}]}`, nil)
+	var buf bytes.Buffer
+	if code := runProcess(proj, cfgPath, []string{"--foreground"}, &buf); code != 0 {
+		t.Fatalf("process = %d: %s", code, buf.String())
+	}
+	var p proposal
+	b, _ := os.ReadFile(filepath.Join(proj, ".memoria", "proposal.json"))
+	if err := json.Unmarshal(b, &p); err != nil {
+		t.Fatal(err)
+	}
+	if len(p.Pages) != 1 || p.Pages[0].Path != "research/notes.md" {
+		t.Fatalf("pages = %+v, want research/notes.md", p.Pages)
+	}
+}
+
 func TestProcessApply(t *testing.T) {
 	proj, cfgPath, digest := processFixture(t)
 	stubProcessor(t, goodProposalPages, nil)
@@ -585,17 +635,41 @@ func TestRenderPage(t *testing.T) {
 }
 
 func TestValidPagePath(t *testing.T) {
+	dirs := map[string]bool{"research": true, "trash": true, "_global": true, ".obsidian": true}
 	for p, want := range map[string]bool{
 		"index.md":            true,
 		"concepts/x.md":       true,
 		"sessions/s1.md":      true,
+		"research/x.md":       true, // existing custom folder
+		"notes/x.md":          false, // folder does not exist
 		"sessions/../x.md":    false,
-		"trash/x.md":          false,
+		"trash/x.md":          false, // reserved even though listed in dirs
 		"trash/concepts/x.md": false,
+		"_global/x.md":        false, // reserved
+		".obsidian/x.md":      false, // dot-dir reserved
+		"concepts/.hidden.md": false, // dot-file reserved
+		"research.md":         false, // top-level file outside index.md
 	} {
-		if validPagePath(p) != want {
+		if validPagePath(p, dirs) != want {
 			t.Fatalf("validPagePath(%q) = %v, want %v", p, !want, want)
 		}
+	}
+}
+
+func TestWikiDirs(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "notes"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "x.md"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := wikiDirs(root)
+	if !got["notes"] || len(got) != 1 {
+		t.Fatalf("wikiDirs = %v, want only notes", got)
+	}
+	if got := wikiDirs(filepath.Join(root, "missing")); len(got) != 0 {
+		t.Fatalf("missing root: %v, want empty", got)
 	}
 }
 

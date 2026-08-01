@@ -149,8 +149,17 @@ func seedWiki(cfg config, dir, wikiRoot, configPath string, out io.Writer) (stri
 	if err := json.Unmarshal([]byte(jsonStr), &pp); err != nil {
 		return "", fmt.Errorf("processor returned invalid JSON: %w", err)
 	}
-	if err := validatePages(pp.Pages); err != nil {
-		return "", err
+	pages, dropped := validatePages(pp.Pages, wikiRoot)
+	for _, d := range dropped {
+		fmt.Fprintln(out, "warning:", d)
+		logf("seed", "warning: %s", d)
+	}
+	if len(pages) == 0 {
+		return "", fmt.Errorf("seed has no valid pages (%d dropped)", len(dropped))
+	}
+	pp.Pages = pages
+	if len(dropped) > 0 {
+		pp.Rationale += fmt.Sprintf(" (%d invalid page(s) dropped)", len(dropped))
 	}
 	for _, pg := range pp.Pages {
 		dst := filepath.Join(wikiRoot, filepath.FromSlash(pg.Path))

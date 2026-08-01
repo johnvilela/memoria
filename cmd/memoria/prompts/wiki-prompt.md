@@ -86,8 +86,11 @@ form. JSON keys stay in English.
 Produce a ConsolidatedBatch JSON object with 1-5 page updates.
 Extract concept / decision / gotcha / rule pages alongside the
 session summary when the session yields reusable insight;
-otherwise return only the session page. Schema and required
-keys are enumerated in the user message.
+otherwise return only the session page. The category folders
+are suggestions — a top-level folder that already exists in the
+current wiki is also a valid home when it fits better. Never
+invent new top-level folders. Schema and required keys are
+enumerated in the user message.
 
 ## Output format
 

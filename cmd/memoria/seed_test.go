@@ -107,6 +107,34 @@ func TestSeedWikiRejectsInvalid(t *testing.T) {
 	}
 }
 
+func TestSeedWikiDropsInvalidKeepsRest(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "memoria", "config.yaml")
+	dir := gitDir(t, true)
+	wikiRoot := filepath.Join(dir, "wiki")
+	stubProcessor(t, `{"pages":[
+		{"path":"concepts/engine.md","title":"Engine","body_markdown":"# Engine\n"},
+		{"path":"research/x.md","title":"x","body_markdown":"y"}
+	],"rationale":"seeded"}`, nil)
+	var buf bytes.Buffer
+	rationale, err := seedWiki(config{Processor: "claude-code"}, dir, wikiRoot, cfgPath, &buf)
+	if err != nil {
+		t.Fatalf("seedWiki: %v", err)
+	}
+	// fresh wiki has no research/ dir, so that page drops
+	if _, err := os.Stat(filepath.Join(wikiRoot, "concepts", "engine.md")); err != nil {
+		t.Fatalf("engine.md not written: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(wikiRoot, "research")); !os.IsNotExist(err) {
+		t.Fatal("research/ written despite invalid page")
+	}
+	if !strings.Contains(buf.String(), "warning:") || !strings.Contains(buf.String(), "research/x.md") {
+		t.Fatalf("warning missing: %s", buf.String())
+	}
+	if rationale != "seeded (1 invalid page(s) dropped)" {
+		t.Fatalf("rationale = %q", rationale)
+	}
+}
+
 func TestSeedPromptReadsHEADNotWorktree(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), "memoria", "config.yaml")
 	dir := gitDir(t, true)

@@ -33,6 +33,7 @@ func runBootstrap(cwd, configPath, wikiName string, background, seedForeground b
 			if folder == "" {
 				folder = "wiki"
 			}
+			warnReservedDirs(filepath.Join(cwd, folder), out)
 			writeAgentsFiles(cwd, folder, out)
 			if len(readWiki(filepath.Join(cwd, folder))) > 0 {
 				return 0

@@ -25,13 +25,13 @@ const lintContract = `Output ONLY a JSON object, no code fences, no commentary:
 const lintFixPrompt = `You resolve lint findings in a personal coding-knowledge wiki.
 Given the findings and the full content of the pages involved, return the
 smallest set of page changes that removes the conflict: update a page to fix a
-contradiction, delete a page that is stale or fully duplicated elsewhere.
-Only touch the pages listed in the findings.
+contradiction, delete (move to the wiki's trash/) a page that is stale or
+fully duplicated elsewhere. Only touch the pages listed in the findings.
 
 Output ONLY a JSON object, no code fences, no commentary:
 {"pages":[{"action":"update"|"create"|"delete","path":"...","title":"...","content":"full markdown"}]}
-"path" is relative to the wiki root. "delete" needs only "path"; every other
-action needs a non-empty title and content.`
+"path" is relative to the wiki root. "delete" moves the page to trash/ and
+needs only "path"; every other action needs a non-empty title and content.`
 
 type lintFinding struct {
 	Kind     string   `json:"kind"`
@@ -265,18 +265,25 @@ func lintApply(cfg config, wikiRoot, lintPath string, out io.Writer) int {
 		fmt.Fprintln(out, "error: processor returned invalid JSON:", err)
 		return 1
 	}
-	if err := validateLintFix(fix.Pages, findings); err != nil {
-		fmt.Fprintln(out, "error:", err)
+	pages, dropped := validateLintFix(fix.Pages, findings, wikiRoot)
+	for _, d := range dropped {
+		fmt.Fprintln(out, "warning:", d)
+		logf("lint", "warning: %s", d)
+	}
+	if len(pages) == 0 {
+		fmt.Fprintf(out, "error: fix has no valid pages (%d dropped)\n", len(dropped))
 		return 1
 	}
+	fix.Pages = pages
 	for _, pg := range fix.Pages {
 		dst := filepath.Join(wikiRoot, filepath.FromSlash(pg.Path))
 		if pg.Action == "delete" {
-			if err := os.Remove(dst); err != nil {
+			trashed, err := trashPage(wikiRoot, pg.Path)
+			if err != nil {
 				fmt.Fprintln(out, "error:", err)
 				return 1
 			}
-			fmt.Fprintf(out, "deleted %s\n", dst)
+			fmt.Fprintf(out, "trashed %s → %s\n", pg.Path, trashed)
 			continue
 		}
 		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
@@ -360,11 +367,10 @@ func validateFindings(findings []lintFinding, wiki map[string]string) error {
 
 // validateLintFix reuses the wiki path rules and additionally confines
 // deletes to pages the findings name — the fix pass may not remove
-// unrelated wiki content.
-func validateLintFix(pages []lintPage, findings []lintFinding) error {
-	if len(pages) == 0 {
-		return fmt.Errorf("fix has no pages")
-	}
+// unrelated wiki content. Invalid pages drop with a reason; callers warn
+// and fail only when nothing survives.
+func validateLintFix(pages []lintPage, findings []lintFinding, wikiRoot string) (valid []lintPage, dropped []string) {
+	dirs := wikiDirs(wikiRoot)
 	cited := map[string]bool{}
 	for _, f := range findings {
 		for _, p := range f.Pages {
@@ -372,23 +378,28 @@ func validateLintFix(pages []lintPage, findings []lintFinding) error {
 		}
 	}
 	for _, p := range pages {
-		if !validPagePath(p.Path) {
-			return fmt.Errorf("page path %q outside the wiki structure", p.Path)
+		if !validPagePath(p.Path, dirs) {
+			dropped = append(dropped, fmt.Sprintf("page %q dropped: path outside the wiki structure", p.Path))
+			continue
 		}
 		switch p.Action {
 		case "create", "update":
 			if p.Title == "" || p.Content == "" {
-				return fmt.Errorf("page %q: empty title or content", p.Path)
+				dropped = append(dropped, fmt.Sprintf("page %q dropped: empty title or content", p.Path))
+				continue
 			}
 		case "delete":
 			if !cited[p.Path] {
-				return fmt.Errorf("delete of %q not backed by any finding", p.Path)
+				dropped = append(dropped, fmt.Sprintf("page %q dropped: delete not backed by any finding", p.Path))
+				continue
 			}
 		default:
-			return fmt.Errorf("page %q: invalid action %q", p.Path, p.Action)
+			dropped = append(dropped, fmt.Sprintf("page %q dropped: invalid action %q", p.Path, p.Action))
+			continue
 		}
+		valid = append(valid, p)
 	}
-	return nil
+	return valid, dropped
 }
 
 func buildLintPrompt(rules string, wiki map[string]string, denied []lintDenied) string {

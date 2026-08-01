@@ -225,8 +225,41 @@ func TestLintApply(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(proj, "wiki", "decisions", "queue-lib.md")); !os.IsNotExist(err) {
 		t.Fatal("superseded page not deleted")
 	}
+	b, err = os.ReadFile(filepath.Join(proj, "wiki", "trash", "decisions", "queue-lib.md"))
+	if err != nil {
+		t.Fatalf("deleted page not moved to trash: %v", err)
+	}
+	if !strings.HasPrefix(string(b), "---\ntags: [deleted]\n---") {
+		t.Fatalf("deleted tag not added: %q", b)
+	}
+	if !strings.Contains(buf.String(), "trashed") {
+		t.Fatalf("output missing trashed line: %s", buf.String())
+	}
 	if _, err := os.Stat(report); !os.IsNotExist(err) {
 		t.Fatal("report not consumed after apply")
+	}
+}
+
+func TestLintApplyDropsBadFixKeepsRest(t *testing.T) {
+	proj, cfgPath := lintFixture(t)
+	report := writeLintReport(t, proj)
+	stubProcessor(t, `{"pages":[
+		{"action":"update","path":"concepts/queue.md","title":"Queue","content":"# Queue\n\nresolved: channels\n"},
+		{"action":"delete","path":"concepts/unrelated.md"}
+	]}`, nil)
+	var buf bytes.Buffer
+	if code := runLint(proj, cfgPath, []string{"--apply"}, &buf); code != 0 {
+		t.Fatalf("apply = %d: %s", code, buf.String())
+	}
+	b, err := os.ReadFile(filepath.Join(proj, "wiki", "concepts", "queue.md"))
+	if err != nil || !strings.Contains(string(b), "resolved: channels") {
+		t.Fatalf("page not updated: %v %q", err, b)
+	}
+	if !strings.Contains(buf.String(), "warning:") || !strings.Contains(buf.String(), "concepts/unrelated.md") {
+		t.Fatalf("warning missing: %s", buf.String())
+	}
+	if _, err := os.Stat(report); !os.IsNotExist(err) {
+		t.Fatal("report not consumed after partial apply")
 	}
 }
 

@@ -25,7 +25,7 @@ var defaultWikiPrompt string
 // can't break parsing
 const jsonContract = `Output ONLY a ConsolidatedBatch JSON object, no code fences, no commentary:
 {"pages":[{"path":"...","title":"...","tags":["tag-1"],"body_markdown":"markdown body"}]}
-"path" is relative to the wiki root and encodes the kind: "index.md" or under concepts/, decisions/, gotchas/, rules/ or sessions/, always ending in .md.
+"path" is relative to the wiki root, always ending in .md. Valid targets: "index.md", the suggested categories concepts/, decisions/, gotchas/, rules/, sessions/, and any other top-level folder already present in the CURRENT WIKI section. Do NOT invent new top-level folders; trash/, _global/ and dot-folders are reserved.
 The episodic session page goes at "sessions/<session_id>.md" (session_id from the digest frontmatter).
 "body_markdown" is the page body without frontmatter — memoria writes the tags frontmatter itself.
 "tags" are 0-5 short kebab-case tags. 1-5 pages.`
@@ -113,6 +113,7 @@ func runProcess(cwd, configPath string, args []string, out io.Writer) int {
 	}
 	wikiRoot := filepath.Join(proj, wikiName)
 	proposalPath := filepath.Join(proj, ".memoria", "proposal.json")
+	warnReservedDirs(wikiRoot, out)
 
 	if *inspect {
 		return inspectProcess(configPath, p.Name, out)
@@ -285,15 +286,24 @@ func generateProposal(cfg config, proj, wikiRoot, proposalPath, configPath, proj
 	if err := json.Unmarshal([]byte(jsonStr), &pp); err != nil {
 		return fail(fmt.Errorf("processor returned invalid JSON: %w", err))
 	}
-	if err := validatePages(pp.Pages); err != nil {
-		return fail(err)
+	pages, droppedPages := validatePages(pp.Pages, wikiRoot)
+	for _, d := range droppedPages {
+		fmt.Fprintln(out, "warning:", d)
+		logf("process", "%s: warning: %s", projName, d)
+	}
+	if len(pages) == 0 {
+		return fail(fmt.Errorf("proposal has no valid pages (%d dropped)", len(droppedPages)))
+	}
+	droppedNote := ""
+	if len(droppedPages) > 0 {
+		droppedNote = fmt.Sprintf(" — dropped %d invalid page(s)", len(droppedPages))
 	}
 
 	prop := proposal{
 		Project:     projName,
 		GeneratedAt: time.Now().Format(time.RFC3339),
 		Sessions:    sessions,
-		Pages:       pp.Pages,
+		Pages:       pages,
 	}
 	b, err := json.MarshalIndent(prop, "", "  ")
 	if err != nil {
@@ -310,13 +320,13 @@ func generateProposal(cfg config, proj, wikiRoot, proposalPath, configPath, proj
 		if code := applyProposal(cfg, proj, wikiRoot, proposalPath, queuePath(configPath), projName, out); code != 0 {
 			return fail(fmt.Errorf("auto-apply failed — proposal kept at %s", proposalPath))
 		}
-		done(fmt.Sprintf("applied %d pages from %d sessions", len(prop.Pages), len(sessions)))
+		done(fmt.Sprintf("applied %d pages from %d sessions", len(prop.Pages), len(sessions)) + droppedNote)
 		notify(cfg, "memoria", fmt.Sprintf("Applied %d wiki page(s) for %s", len(prop.Pages), projName))
 		logf("process", "%s: auto-applied %d pages from %d sessions", projName, len(prop.Pages), len(sessions))
 		return 0
 	}
 	fmt.Fprintf(out, "Review %s then run: memoria process --apply\n", proposalPath)
-	done(fmt.Sprintf("proposal ready: %d pages from %d sessions — review and run memoria process --apply", len(prop.Pages), len(sessions)))
+	done(fmt.Sprintf("proposal ready: %d pages from %d sessions — review and run memoria process --apply", len(prop.Pages), len(sessions)) + droppedNote)
 	notify(cfg, "memoria", "Proposal ready for "+projName+" — review and run memoria process --apply")
 	logf("process", "%s: proposal with %d pages from %d sessions", projName, len(prop.Pages), len(sessions))
 	return 0
@@ -337,10 +347,15 @@ func applyProposal(cfg config, proj, wikiRoot, proposalPath, qPath, projName str
 		fmt.Fprintf(out, "error: proposal is for %q, current project is %q\n", prop.Project, projName)
 		return 1
 	}
-	if err := validatePages(prop.Pages); err != nil {
-		fmt.Fprintln(out, "error:", err)
+	pages, dropped := validatePages(prop.Pages, wikiRoot)
+	for _, d := range dropped {
+		fmt.Fprintln(out, "warning:", d)
+	}
+	if len(pages) == 0 {
+		fmt.Fprintf(out, "error: proposal has no valid pages (%d dropped)\n", len(dropped))
 		return 1
 	}
+	prop.Pages = pages
 	for _, pg := range prop.Pages {
 		dst := filepath.Join(wikiRoot, filepath.FromSlash(pg.Path))
 		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
@@ -379,37 +394,74 @@ func applyProposal(cfg config, proj, wikiRoot, proposalPath, qPath, projName str
 	return 0
 }
 
-// validatePages is the trust boundary for LLM output: only .md files inside
-// the wiki categories (or index.md), no traversal, nothing empty.
-func validatePages(pages []wikiPage) error {
-	if len(pages) == 0 {
-		return fmt.Errorf("proposal has no pages")
-	}
+// validatePages is the trust boundary for LLM output: valid paths only (see
+// validPagePath), no traversal, nothing empty. Invalid pages are dropped
+// with a reason instead of failing the batch — callers warn and fail only
+// when nothing survives.
+func validatePages(pages []wikiPage, wikiRoot string) (valid []wikiPage, dropped []string) {
+	dirs := wikiDirs(wikiRoot)
 	for _, p := range pages {
-		if p.Title == "" || p.BodyMarkdown == "" {
-			return fmt.Errorf("page %q: empty title or body_markdown", p.Path)
-		}
-		if !validPagePath(p.Path) {
-			return fmt.Errorf("page path %q outside the wiki structure", p.Path)
+		switch {
+		case p.Title == "" || p.BodyMarkdown == "":
+			dropped = append(dropped, fmt.Sprintf("page %q dropped: empty title or body_markdown", p.Path))
+		case !validPagePath(p.Path, dirs):
+			dropped = append(dropped, fmt.Sprintf("page %q dropped: path outside the wiki structure", p.Path))
+		default:
+			valid = append(valid, p)
 		}
 	}
-	return nil
+	return valid, dropped
 }
 
-func validPagePath(p string) bool {
+// validPagePath accepts index.md, the native categories, and any top-level
+// folder already present in the wiki (dirs) — the LLM may not invent new
+// ones. trash/, _global/ and dot-prefixed segments are reserved.
+func validPagePath(p string, dirs map[string]bool) bool {
 	if !strings.HasSuffix(p, ".md") || strings.Contains(p, "..") ||
 		strings.HasPrefix(p, "/") || p != path.Clean(p) {
 		return false
 	}
+	for _, seg := range strings.Split(p, "/") {
+		if strings.HasPrefix(seg, ".") {
+			return false
+		}
+	}
 	if p == "index.md" {
 		return true
 	}
-	for _, c := range []string{"concepts/", "decisions/", "gotchas/", "rules/", "sessions/"} {
-		if strings.HasPrefix(p, c) {
+	first, _, found := strings.Cut(p, "/")
+	if !found || first == "trash" || first == "_global" {
+		return false
+	}
+	for _, c := range []string{"concepts", "decisions", "gotchas", "rules", "sessions"} {
+		if first == c {
 			return true
 		}
 	}
-	return false
+	return dirs[first]
+}
+
+// warnReservedDirs tells the user when a wiki folder shadows a reserved
+// name — its pages are read into prompts but memoria will never write there.
+func warnReservedDirs(wikiRoot string, out io.Writer) {
+	if wikiDirs(wikiRoot)["_global"] {
+		fmt.Fprintln(out, "warning: wiki folder _global/ is reserved for memoria; its pages are read but never written")
+	}
+}
+
+// wikiDirs lists top-level dirs in the wiki root; missing root → empty map.
+func wikiDirs(root string) map[string]bool {
+	dirs := map[string]bool{}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return dirs
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			dirs[e.Name()] = true
+		}
+	}
+	return dirs
 }
 
 // loadWikiPrompt returns the prompt from the file next to the config if the
