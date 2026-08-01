@@ -2,7 +2,7 @@
 tags: [index]
 ---
 
-Long-term memory and a per-project wiki for code agents, built from their chat sessions. Start with [[concepts/architecture-overview]] for the pipeline end to end.
+Start with [[concepts/architecture-overview]] for the pipeline end to end.
 
 ## Concepts — how it works
 
@@ -17,6 +17,7 @@ Long-term memory and a per-project wiki for code agents, built from their chat s
 - [[concepts/processor-directory-trust]] — per-provider cwd handling for the CLI processors (codex, claude); git-trust fix `dc9c30f`
 - [[concepts/processor-models-and-effort]] — configurable model/effort for cheaper wiki work (haiku/gpt-5.4.mini by default)
 - [[concepts/wiki-auto-commit]] — applied wiki changes are versioned automatically when inside a git repo
+- [[concepts/queue-write-safety]] — file locking and atomic operations protect queue and status files from concurrent writes
 - [[research/ai-memory-workstream-comparison]] — external (chatgpt) deep-dive on ai-memory v1.19.2 that fed the `run` rework
 
 ## Decisions — why it's shaped this way
@@ -27,6 +28,7 @@ Long-term memory and a per-project wiki for code agents, built from their chat s
 - [[decisions/0004-embedded-prompts-with-file-override]] — prompts ship in the binary (`cmd/memoria/prompts/`), a config file overrides
 - [[decisions/0005-auto-apply-is-opt-in]] — autopilot off by default
 - [[decisions/0006-wiki-auto-commit-on-apply]] — applied wiki changes auto-commit when inside a git repo
+- [[decisions/0007-queue-safety-via-file-locking]] — file locking for queue writes, not append-only redesign
 
 ## Gotchas — what bit us
 
@@ -60,3 +62,4 @@ Long-term memory and a per-project wiki for code agents, built from their chat s
 - [[sessions/e112664f-9954-4d8e-8fd2-a11e13d66bc0]] — handoff made ask-first (`6414c80`); multirepo assessment for eparts, adaptations committed as `31b7251` in incarnation 2
 - [[sessions/c133e40b-8547-4a99-bc98-d14b7029ccfe]] — codex git-trust fix, processor model config, wiki auto-commit — `dc9c30f` + `f0bf53a`
 - [[sessions/44c49197-2dea-4615-8ec2-27849c744218]] — open wiki folders with drop-and-warn validation (`06c9311`)
+- [[sessions/16f159dc-d22a-413f-a3e4-c02ceb22b9cc]] — queue write race condition fixed with file locking (`0f961a7`)
