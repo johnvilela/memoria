@@ -160,7 +160,7 @@ func TestInitInteractiveMultiSelect(t *testing.T) {
 		return []string{"claude-code", "codex"}, nil
 	}
 	// remaining flags silence the other interactive prompts
-	code, out := runInitCmd(t, "--processor", "ollama", "--notification=false", "--auto-apply=false", "--cron", "off")
+	code, out := runInitCmd(t, "--processor", "ollama", "--notification=false", "--auto-apply=false", "--auto-commit=false", "--cron", "off")
 	if code != 0 {
 		t.Fatalf("init = %d: %s", code, out)
 	}
@@ -295,6 +295,51 @@ func TestInitNotificationOmittedPreservesConfig(t *testing.T) {
 	cfg, _ := loadConfig(cfgPath)
 	if !cfg.Notifications {
 		t.Fatal("omitted flag reset notifications")
+	}
+}
+
+func TestInitAutoCommitFlag(t *testing.T) {
+	_, cfgPath := initEnv(t)
+	code, out := runInitCmd(t, "claude-code", "--auto-commit")
+	if code != 0 {
+		t.Fatalf("init = %d: %s", code, out)
+	}
+	if !strings.Contains(out, "Wiki auto-commit enabled") {
+		t.Fatalf("confirmation missing: %q", out)
+	}
+	cfg, err := loadConfig(cfgPath)
+	if err != nil || !cfg.WikiAutoCommit {
+		t.Fatalf("wiki_auto_commit not saved: %v %+v", err, cfg)
+	}
+}
+
+func TestInitAutoCommitFalseFlag(t *testing.T) {
+	_, cfgPath := initEnv(t)
+	if err := saveConfig(cfgPath, config{WikiAutoCommit: true}); err != nil {
+		t.Fatal(err)
+	}
+	code, out := runInitCmd(t, "claude-code", "--auto-commit=false")
+	if code != 0 {
+		t.Fatalf("init = %d: %s", code, out)
+	}
+	cfg, _ := loadConfig(cfgPath)
+	if cfg.WikiAutoCommit {
+		t.Fatal("--auto-commit=false did not disable")
+	}
+}
+
+func TestInitAutoCommitOmittedPreservesConfig(t *testing.T) {
+	_, cfgPath := initEnv(t)
+	if err := saveConfig(cfgPath, config{WikiAutoCommit: true}); err != nil {
+		t.Fatal(err)
+	}
+	code, out := runInitCmd(t, "claude-code") // non-TTY, no flags
+	if code != 0 {
+		t.Fatalf("init = %d: %s", code, out)
+	}
+	cfg, _ := loadConfig(cfgPath)
+	if !cfg.WikiAutoCommit {
+		t.Fatal("omitted flag reset wiki_auto_commit")
 	}
 }
 

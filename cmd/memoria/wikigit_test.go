@@ -42,15 +42,25 @@ func lastSubject(t *testing.T, dir string) string {
 
 func TestCommitWikiDefaultMessage(t *testing.T) {
 	dir, wikiRoot := wikiRepo(t)
-	commitWiki(config{}, wikiRoot, "seed wiki", "1 page(s) (index.md)", 1)
+	commitWiki(config{WikiAutoCommit: true}, wikiRoot, "seed wiki", "1 page(s) (index.md)", 1)
 	if got, want := lastSubject(t, dir), "docs(wiki): seed wiki — 1 page(s) (index.md)"; got != want {
 		t.Fatalf("subject = %q, want %q", got, want)
 	}
 }
 
+// Auto-commit is opt-in: without wiki_auto_commit the wiki stays uncommitted.
+func TestCommitWikiDisabledByDefault(t *testing.T) {
+	dir, wikiRoot := wikiRepo(t)
+	before := lastSubject(t, dir)
+	commitWiki(config{}, wikiRoot, "apply proposal", "1 page(s) (index.md)", 1)
+	if got := lastSubject(t, dir); got != before {
+		t.Fatalf("committed without wiki_auto_commit: %q", got)
+	}
+}
+
 func TestCommitWikiCustomMessage(t *testing.T) {
 	dir, wikiRoot := wikiRepo(t)
-	cfg := config{WikiCommitMessage: "wiki: {action} [{count}] {project}"}
+	cfg := config{WikiAutoCommit: true, WikiCommitMessage: "wiki: {action} [{count}] {project}"}
 	commitWiki(cfg, wikiRoot, "lint fix", "ignored", 3)
 	if got, want := lastSubject(t, dir), "wiki: lint fix [3] "+filepath.Base(dir); got != want {
 		t.Fatalf("subject = %q, want %q", got, want)
@@ -66,7 +76,7 @@ func TestCommitWikiLeavesUserStagingAlone(t *testing.T) {
 	if out, err := exec.Command("git", "-C", dir, "add", "main.go").CombinedOutput(); err != nil {
 		t.Fatalf("git add: %v %s", err, out)
 	}
-	commitWiki(config{}, wikiRoot, "apply proposal", "1 page(s) (index.md)", 1)
+	commitWiki(config{WikiAutoCommit: true}, wikiRoot, "apply proposal", "1 page(s) (index.md)", 1)
 	if got := lastSubject(t, dir); !strings.HasPrefix(got, "docs(wiki):") {
 		t.Fatalf("wiki commit missing, HEAD subject = %q", got)
 	}
@@ -87,7 +97,7 @@ func TestCommitWikiNonGitNoop(t *testing.T) {
 	if err := os.MkdirAll(wikiRoot, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	commitWiki(config{}, wikiRoot, "seed wiki", "x", 1) // must not panic or create a repo
+	commitWiki(config{WikiAutoCommit: true}, wikiRoot, "seed wiki", "x", 1) // must not panic or create a repo
 	if _, err := os.Stat(filepath.Join(wikiRoot, ".git")); err == nil {
 		t.Fatal("commitWiki must not create a git repo")
 	}

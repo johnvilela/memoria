@@ -69,6 +69,13 @@ func run(args []string, stdin io.Reader, out io.Writer) int {
 			return 1
 		}
 		return runSearch(cwd, defaultConfigPath(), args[1:], out)
+	case "commit":
+		cwd, err := os.Getwd()
+		if err != nil {
+			fmt.Fprintln(out, "error:", err)
+			return 1
+		}
+		return runCommit(cwd, defaultConfigPath(), args[1:], out)
 	case "digest":
 		cwd, err := os.Getwd()
 		if err != nil {

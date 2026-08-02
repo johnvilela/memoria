@@ -41,9 +41,14 @@ var autoApplyOptions = []option{
 	{"enabled", "Enabled", "session end consolidates and writes the wiki automatically, lint auto-fixes"},
 }
 
+var autoCommitOptions = []option{
+	{"disabled", "Disabled", "default — commit the wiki yourself with memoria commit"},
+	{"enabled", "Enabled", "every applied wiki change is committed automatically"},
+}
+
 func runInit(args []string, configPath string, out io.Writer) int {
 	usage := func() {
-		fmt.Fprintln(out, "usage: memoria init [<client>...] [--client claude-code,codex] [--processor claude-code|codex|ollama|gemini] [--notification] [--auto-apply] [--cron [<expr|preset|off>]] [--cron-apply]")
+		fmt.Fprintln(out, "usage: memoria init [<client>...] [--client claude-code,codex] [--processor claude-code|codex|ollama|gemini] [--notification] [--auto-apply] [--auto-commit] [--cron [<expr|preset|off>]] [--cron-apply]")
 	}
 	args = normalizeCronArgs(args)
 	// positional clients only as leading args, so flags after them still parse
@@ -57,19 +62,22 @@ func runInit(args []string, configPath string, out io.Writer) int {
 	processor := fs.String("processor", "", "AI provider that processes sessions")
 	notification := fs.Bool("notification", false, "desktop notification when background processing finishes")
 	autoApply := fs.Bool("auto-apply", false, "autopilot: session end consolidates and applies without review")
+	autoCommit := fs.Bool("auto-commit", false, "commit the wiki after every applied change")
 	cron := fs.String("cron", "", "schedule for background processing (cron expression, preset, or off)")
 	cronApply := fs.Bool("cron-apply", false, "scheduled runs apply proposals without review")
 	if err := fs.Parse(args); err != nil {
 		return 1
 	}
 	// set flags must differ from omitted ones (--notification=false vs nothing)
-	var notifSet, autoSet, cronSet, cronApplySet bool
+	var notifSet, autoSet, commitSet, cronSet, cronApplySet bool
 	fs.Visit(func(f *flag.Flag) {
 		switch f.Name {
 		case "notification":
 			notifSet = true
 		case "auto-apply":
 			autoSet = true
+		case "auto-commit":
+			commitSet = true
 		case "cron":
 			cronSet = true
 		case "cron-apply":
@@ -138,6 +146,14 @@ func runInit(args []string, configPath string, out io.Writer) int {
 		}
 		*autoApply, autoSet = v == "enabled", true
 	}
+	if !commitSet && isTTY() {
+		v, err := selectOption("Auto-commit: commit the wiki after every applied change?", autoCommitOptions)
+		if err != nil {
+			fmt.Fprintln(out, "aborted")
+			return 1
+		}
+		*autoCommit, commitSet = v == "enabled", true
+	}
 	if !cronSet && isTTY() {
 		spec, applySel, chosen, err := promptCron("")
 		if err != nil {
@@ -149,7 +165,7 @@ func runInit(args []string, configPath string, out io.Writer) int {
 			*cronApply, cronApplySet = applySel, true
 		}
 	}
-	if code := saveInitConfig(*processor, *notification, notifSet, *autoApply, autoSet, configPath, out); code != 0 {
+	if code := saveInitConfig(*processor, *notification, notifSet, *autoApply, autoSet, *autoCommit, commitSet, configPath, out); code != 0 {
 		return code
 	}
 	if cronSet || cronApplySet {
@@ -235,7 +251,7 @@ func shellRC(shell, home, dir string) (rc, line string) {
 
 // saveInitConfig persists every init choice in a single config write, then
 // runs the warn-only verifications. Nothing chosen → config untouched.
-func saveInitConfig(proc string, notifEnabled, notifSet, autoEnabled, autoSet bool, configPath string, out io.Writer) int {
+func saveInitConfig(proc string, notifEnabled, notifSet, autoEnabled, autoSet, commitEnabled, commitSet bool, configPath string, out io.Writer) int {
 	cfg, err := loadConfig(configPath)
 	if err != nil && !os.IsNotExist(err) {
 		fmt.Fprintln(out, "error:", err)
@@ -246,7 +262,7 @@ func saveInitConfig(proc string, notifEnabled, notifSet, autoEnabled, autoSet bo
 		if cfg.Processor == "" {
 			fmt.Fprintln(out, "No processor configured — rerun with --processor <claude-code|codex|ollama|gemini> to set one.")
 		}
-		if !notifSet && !autoSet {
+		if !notifSet && !autoSet && !commitSet {
 			return 0
 		}
 	}
@@ -275,6 +291,9 @@ func saveInitConfig(proc string, notifEnabled, notifSet, autoEnabled, autoSet bo
 	}
 	if autoSet {
 		cfg.AutoApply = autoEnabled
+	}
+	if commitSet {
+		cfg.WikiAutoCommit = commitEnabled
 	}
 	if err := saveConfig(configPath, cfg); err != nil {
 		fmt.Fprintln(out, "error:", err)
@@ -313,6 +332,13 @@ func saveInitConfig(proc string, notifEnabled, notifSet, autoEnabled, autoSet bo
 			state = "enabled"
 		}
 		fmt.Fprintf(out, "Auto-apply %s in %s\n", state, configPath)
+	}
+	if commitSet {
+		state := "disabled"
+		if commitEnabled {
+			state = "enabled"
+		}
+		fmt.Fprintf(out, "Wiki auto-commit %s in %s\n", state, configPath)
 	}
 	return 0
 }

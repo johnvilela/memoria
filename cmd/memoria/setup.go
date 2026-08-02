@@ -13,7 +13,7 @@ import (
 // and adds capture hooks for more agents without touching existing ones.
 func runSetup(args []string, configPath string, out io.Writer) int {
 	usage := func() {
-		fmt.Fprintln(out, "usage: memoria setup [--client claude-code,codex] [--processor claude-code|codex|ollama|gemini] [--notification] [--auto-apply] [--cron <expr|preset|off>] [--cron-apply]")
+		fmt.Fprintln(out, "usage: memoria setup [--client claude-code,codex] [--processor claude-code|codex|ollama|gemini] [--notification] [--auto-apply] [--auto-commit] [--cron <expr|preset|off>] [--cron-apply]")
 	}
 	args = normalizeCronArgs(args)
 	fs := flag.NewFlagSet("setup", flag.ContinueOnError)
@@ -22,18 +22,21 @@ func runSetup(args []string, configPath string, out io.Writer) int {
 	processor := fs.String("processor", "", "AI provider that processes sessions")
 	notification := fs.Bool("notification", false, "desktop notification when background processing finishes")
 	autoApply := fs.Bool("auto-apply", false, "autopilot: session end consolidates and applies without review")
+	autoCommit := fs.Bool("auto-commit", false, "commit the wiki after every applied change")
 	cron := fs.String("cron", "", "schedule for background processing (cron expression, preset, or off)")
 	cronApply := fs.Bool("cron-apply", false, "scheduled runs apply proposals without review")
 	if err := fs.Parse(args); err != nil {
 		return 1
 	}
-	var notifSet, autoSet, cronSet, cronApplySet bool
+	var notifSet, autoSet, commitSet, cronSet, cronApplySet bool
 	fs.Visit(func(f *flag.Flag) {
 		switch f.Name {
 		case "notification":
 			notifSet = true
 		case "auto-apply":
 			autoSet = true
+		case "auto-commit":
+			commitSet = true
 		case "cron":
 			cronSet = true
 		case "cron-apply":
@@ -69,7 +72,7 @@ func runSetup(args []string, configPath string, out io.Writer) int {
 	}
 
 	// any flag given = change exactly that, keep the rest — no prompts
-	anySet := *clientFlag != "" || *processor != "" || notifSet || autoSet || cronSet || cronApplySet
+	anySet := *clientFlag != "" || *processor != "" || notifSet || autoSet || commitSet || cronSet || cronApplySet
 	if !anySet {
 		if !isTTY() {
 			usage()
@@ -138,6 +141,20 @@ func runSetup(args []string, configPath string, out io.Writer) int {
 				*autoApply, autoSet = v == "enabled", true
 			}
 		}
+		if !commitSet {
+			cur := "disabled"
+			if cfg.WikiAutoCommit {
+				cur = "enabled"
+			}
+			opts := append([]option{{"keep", "Keep current (" + cur + ")", ""}}, autoCommitOptions...)
+			v, err := selectOption("Auto-commit: commit the wiki after every applied change?", opts)
+			if err != nil {
+				return aborted()
+			}
+			if v != "keep" {
+				*autoCommit, commitSet = v == "enabled", true
+			}
+		}
 		if !cronSet {
 			cur := cfg.Cron
 			if cur == "" {
@@ -159,8 +176,8 @@ func runSetup(args []string, configPath string, out io.Writer) int {
 			return code
 		}
 	}
-	if *processor != "" || notifSet || autoSet {
-		if code := saveInitConfig(*processor, *notification, notifSet, *autoApply, autoSet, configPath, out); code != 0 {
+	if *processor != "" || notifSet || autoSet || commitSet {
+		if code := saveInitConfig(*processor, *notification, notifSet, *autoApply, autoSet, *autoCommit, commitSet, configPath, out); code != 0 {
 			return code
 		}
 	}
