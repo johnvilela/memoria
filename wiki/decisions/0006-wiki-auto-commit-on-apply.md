@@ -2,6 +2,8 @@
 tags: [adr, wiki, git, auto-commit]
 ---
 
+> **Superseded in part by [[decisions/0010-wiki-auto-commit-is-opt-in]]**: the mechanism below is unchanged, but it is now gated on `wiki_auto_commit` and off by default. `memoria commit` is the manual path.
+
 **Decision** (commit `f0bf53a`): when memoria applies changes to the wiki (proposals, lint fixes, seed, session pages), automatically stage and commit the `wiki/` folder if it sits inside a git repository. Commit message follows a configurable pattern; failures are logged and never break the apply.
 
 **Rationale**: The curated `wiki/` folder is [[decisions/0001-plain-markdown-no-db|meant to be committed with the project]]. Requiring users to manually commit after every proposal, lint fix, or session digest is friction. Auto-commit removes that friction — the wiki stays version-controlled without extra steps.
@@ -24,4 +26,4 @@ wiki_commit_message: "wiki: {action} [{count}] {project}"
 
 Message customization is an escape hatch; the default handles most workflows.
 
-Related: [[decisions/0001-plain-markdown-no-db]] (why the wiki is versioned), [[concepts/wiki-auto-commit]] (how it works).
+Related: [[decisions/0001-plain-markdown-no-db]] (why the wiki is versioned), [[concepts/wiki-auto-commit]] (how it works), [[decisions/0010-wiki-auto-commit-is-opt-in]] (why it no longer runs by default).

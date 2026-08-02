@@ -16,7 +16,7 @@ Start with [[concepts/architecture-overview]] for the pipeline end to end.
 - [[concepts/handoff-vs-ai-memory]] — research: ai-memory's deterministic workstream handoff vs memoria's — spawned the packet handoff (`ad5d206`)
 - [[concepts/processor-directory-trust]] — per-provider cwd handling for the CLI processors (codex, claude); git-trust fix `dc9c30f`
 - [[concepts/processor-models-and-effort]] — configurable model/effort for cheaper wiki work (haiku/gpt-5.4.mini by default)
-- [[concepts/wiki-auto-commit]] — applied wiki changes are versioned automatically when inside a git repo
+- [[concepts/wiki-auto-commit]] — how wiki commits are built; opt-in for applies, always for `memoria commit`
 - [[concepts/queue-write-safety]] — file locking and atomic operations protect queue and status files from concurrent writes
 - [[research/ai-memory-workstream-comparison]] — external (chatgpt) deep-dive on ai-memory v1.19.2 that fed the `run` rework
 
@@ -27,8 +27,9 @@ Start with [[concepts/architecture-overview]] for the pipeline end to end.
 - [[decisions/0003-never-block-the-agent]] — LLM-driven work runs detached
 - [[decisions/0004-embedded-prompts-with-file-override]] — prompts ship in the binary (`cmd/memoria/prompts/`), a config file overrides
 - [[decisions/0005-auto-apply-is-opt-in]] — autopilot off by default
-- [[decisions/0006-wiki-auto-commit-on-apply]] — applied wiki changes auto-commit when inside a git repo
+- [[decisions/0006-wiki-auto-commit-on-apply]] — applied wiki changes auto-commit when inside a git repo (default reversed by 0010)
 - [[decisions/0007-queue-safety-via-file-locking]] — file locking for queue writes, not append-only redesign
+- [[decisions/0010-wiki-auto-commit-is-opt-in]] — auto-commit off by default; `memoria commit` is the manual path
 
 ## Gotchas — what bit us
 
