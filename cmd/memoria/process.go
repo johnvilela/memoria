@@ -673,10 +673,36 @@ func buildPrompt(rules string, wiki, digests map[string]string) string {
 	}
 	b.WriteString("\n--- SESSION DIGESTS ---\n")
 	for _, p := range slices.Sorted(maps.Keys(digests)) {
-		fmt.Fprintf(&b, "\n### %s\n\n%s\n", p, digests[p])
+		fmt.Fprintf(&b, "\n### %s\n", p)
+		// a reopened session writes a fresh digest, but its page keeps the bare
+		// session id — and applying overwrites that page wholesale. continues_from
+		// points at the previous *digest*, so name the wiki page outright rather
+		// than leave the model to derive it.
+		if note := continuationNote(digests[p], wiki); note != "" {
+			fmt.Fprintf(&b, "\n%s\n", note)
+		}
+		fmt.Fprintf(&b, "\n%s\n", digests[p])
 	}
 	b.WriteString("\n--- OUTPUT FORMAT ---\n" + jsonContract + "\n")
 	return b.String()
+}
+
+// continuationNote flags a digest that resumes a session already holding a
+// wiki page, naming the page to extend. Empty for a first incarnation or when
+// the session has no page yet — nothing to preserve in either case.
+func continuationNote(digest string, wiki map[string]string) string {
+	front, _ := splitFrontmatter(digest)
+	sid := frontKey(front, "session_id")
+	if sid == "" || frontKey(front, "continues_from") == "" {
+		return ""
+	}
+	page := "sessions/" + sid + ".md"
+	if _, ok := wiki[page]; !ok {
+		return ""
+	}
+	return fmt.Sprintf("(continues session %s — %s in CURRENT WIKI is this same session's"+
+		" earlier work. Extend it: keep its existing sections and add this stretch."+
+		" Do not re-summarize it shorter.)", sid, page)
 }
 
 // extractJSON tolerates fences/chatter around the object.

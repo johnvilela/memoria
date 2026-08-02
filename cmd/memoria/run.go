@@ -66,7 +66,12 @@ func parseDigest(path string) (front, body string) {
 	if err != nil {
 		return "", ""
 	}
-	s := string(b)
+	return splitFrontmatter(string(b))
+}
+
+// splitFrontmatter is parseDigest over text already in hand — the prompt
+// builder holds digest contents, not paths.
+func splitFrontmatter(s string) (front, body string) {
 	rest, ok := strings.CutPrefix(s, "---\n")
 	if !ok {
 		return "", s

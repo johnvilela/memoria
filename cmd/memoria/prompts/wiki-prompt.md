@@ -92,6 +92,15 @@ current wiki is also a valid home when it fits better. Never
 invent new top-level folders. Schema and required keys are
 enumerated in the user message.
 
+Every page you emit REPLACES the current one at that path — the
+body you return is the whole page, not a patch. So when you
+target a path that already exists in CURRENT WIKI, carry its
+still-accurate content forward instead of writing a shorter
+summary of it. This matters most for a digest marked as
+continuing a session: that session's page is earlier work from
+the same session, and dropping its sections loses the only
+record of them.
+
 ## Output format
 
 - Reply with ONE JSON object, nothing else. NO prose preamble,

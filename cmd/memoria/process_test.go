@@ -982,3 +982,34 @@ func TestApplyArchivesProposalWithoutSizes(t *testing.T) {
 		t.Errorf("digest not archived: %v", err)
 	}
 }
+
+// an incarnation's page overwrites the previous one wholesale, so the prompt
+// has to say the existing page is the same session's earlier work — the model
+// otherwise has to infer it from a continues_from path pointing at a digest
+// file, not at the wiki page.
+func TestBuildPromptFlagsContinuation(t *testing.T) {
+	sid := "c589857b-ebc9-470b-9bc1-40006eb896ae"
+	page := "sessions/" + sid + ".md"
+	wiki := map[string]string{page: "# Earlier\n\nfirst stretch\n"}
+	cont := "---\nsession_id: " + sid + "\ncontinues_from: ../processed/" + sid + ".md\n---\n\n@user-prompt 'more'\n"
+	fresh := "---\nsession_id: " + sid + "\n---\n\n@user-prompt 'more'\n"
+
+	t.Run("continuation with an existing page", func(t *testing.T) {
+		got := buildPrompt("rules", wiki, map[string]string{"/p/d-2.md": cont})
+		if !strings.Contains(got, page) || !strings.Contains(got, "continues session") {
+			t.Errorf("prompt does not name the page to extend:\n%s", got)
+		}
+	})
+	t.Run("continuation with no existing page", func(t *testing.T) {
+		got := buildPrompt("rules", map[string]string{}, map[string]string{"/p/d-2.md": cont})
+		if strings.Contains(got, "continues session") {
+			t.Error("flagged a continuation with nothing to extend")
+		}
+	})
+	t.Run("first incarnation", func(t *testing.T) {
+		got := buildPrompt("rules", wiki, map[string]string{"/p/d.md": fresh})
+		if strings.Contains(got, "continues session") {
+			t.Error("flagged a non-continuation")
+		}
+	})
+}
