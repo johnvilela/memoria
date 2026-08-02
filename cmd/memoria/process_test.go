@@ -640,7 +640,7 @@ func TestValidPagePath(t *testing.T) {
 		"index.md":            true,
 		"concepts/x.md":       true,
 		"sessions/s1.md":      true,
-		"research/x.md":       true, // existing custom folder
+		"research/x.md":       true,  // existing custom folder
 		"notes/x.md":          false, // folder does not exist
 		"sessions/../x.md":    false,
 		"trash/x.md":          false, // reserved even though listed in dirs
@@ -736,5 +736,249 @@ func TestProcessAllAutoApplyNoDouble(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(projs[0], "wiki", "concepts", "queue.md")); err != nil {
 		t.Fatalf("page not written: %v", err)
+	}
+}
+
+func TestDigestHasContent(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want bool
+	}{
+		{"bookends only", "---\nkind: session-digest\n---\n\n@session-start source: resume\n@session-end reason: prompt_input_exit\n", false},
+		{"frontmatter only", "---\nkind: session-digest\n---\n", false},
+		{"user prompt", "---\n---\n\n@session-start source: startup\n@user-prompt 'fix the parser'\n@session-end\n", true},
+		{"tool use", "---\n---\n\n@session-start source: resume\n@post-tool-use Write /p/a.go\n", true},
+		{"prose mentioning @session-start", "---\n---\n\nthe agent logged @session-start twice\n", false},
+	}
+	for _, c := range cases {
+		if got := digestHasContent(c.body); got != c.want {
+			t.Errorf("%s: digestHasContent = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
+// an empty digest must never reach the processor: the LLM rightly returns zero
+// pages for it, which used to fail the whole batch and leave the entry stuck in
+// the queue re-failing forever.
+func TestCollectEndedRetiresEmptyDigests(t *testing.T) {
+	proj, cfgPath, real := processFixture(t)
+	projName := filepath.Base(proj)
+	empty := digestFile(proj, "s2")
+	body := "---\nkind: session-digest\n---\n\n@session-start source: resume\n@session-end reason: prompt_input_exit\n"
+	if err := os.WriteFile(empty, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := queueAdd(queuePath(cfgPath), projName, empty); err != nil {
+		t.Fatal(err)
+	}
+	if err := queueMarkEnded(queuePath(cfgPath), projName, empty); err != nil {
+		t.Fatal(err)
+	}
+
+	sessions, digests, err := collectEnded(queuePath(cfgPath), projName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions) != 1 || sessions[0] != real {
+		t.Fatalf("sessions = %v, want only %s", sessions, real)
+	}
+	if _, ok := digests[empty]; ok {
+		t.Error("empty digest reached the prompt")
+	}
+	if _, err := os.Stat(empty); !os.IsNotExist(err) {
+		t.Error("empty digest still in pending/")
+	}
+	archived := filepath.Join(proj, ".memoria", "sessions", "processed", "s2.md")
+	if _, err := os.Stat(archived); err != nil {
+		t.Errorf("empty digest not archived: %v", err)
+	}
+	q, err := loadQueue(queuePath(cfgPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range q[projName] {
+		if e.Path == empty {
+			t.Error("empty digest still queued")
+		}
+	}
+}
+
+// a project whose only ended session is empty has nothing to process — it must
+// report that, not error out and fire a failure notification.
+func TestProcessEmptyDigestOnlyIsNotAnError(t *testing.T) {
+	proj := t.TempDir()
+	cfgPath := testConfig(t, proj)
+	projName := filepath.Base(proj)
+	empty := digestFile(proj, "s1")
+	if err := os.MkdirAll(filepath.Dir(empty), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := "---\nkind: session-digest\n---\n\n@session-start source: resume\n@session-end reason: prompt_input_exit\n"
+	if err := os.WriteFile(empty, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := queueAdd(queuePath(cfgPath), projName, empty); err != nil {
+		t.Fatal(err)
+	}
+	if err := queueMarkEnded(queuePath(cfgPath), projName, empty); err != nil {
+		t.Fatal(err)
+	}
+	stubProcessor(t, "", fmt.Errorf("processor must not be invoked"))
+
+	var buf bytes.Buffer
+	if code := runProcess(proj, cfgPath, []string{"--foreground"}, &buf); code != 0 {
+		t.Fatalf("process = %d, want 0: %s", code, buf.String())
+	}
+	st, _ := loadStatus(statusPath(cfgPath))
+	if st[projName].State != "done" {
+		t.Fatalf("status = %+v, want done", st[projName])
+	}
+}
+
+func TestCanonicalizeSessionPaths(t *testing.T) {
+	// a uuid whose last segment is all digits — the incarnation suffix must be
+	// matched against known ids, never guessed off the shape of the name
+	digitTail := "9f2c1a7b-4e55-4c31-8a90-400060889612"
+	sids := []string{"s1", digitTail}
+	pages := []wikiPage{
+		{Path: "sessions/s1-2.md", Title: "T", BodyMarkdown: "b"},
+		{Path: "sessions/" + digitTail + ".md", Title: "T", BodyMarkdown: "b"},
+		{Path: "concepts/queue.md", Title: "T", BodyMarkdown: "b"},
+		{Path: "sessions/not-a-session.md", Title: "T", BodyMarkdown: "b"},
+	}
+	got, dropped := canonicalizeSessionPaths(pages, sids)
+	want := []string{"sessions/s1.md", "sessions/" + digitTail + ".md", "concepts/queue.md"}
+	if len(got) != len(want) {
+		t.Fatalf("got %d pages, want %d: %+v", len(got), len(want), got)
+	}
+	for i, w := range want {
+		if got[i].Path != w {
+			t.Errorf("page %d = %q, want %q", i, got[i].Path, w)
+		}
+	}
+	if len(dropped) != 1 || !strings.Contains(dropped[0], "not-a-session") {
+		t.Errorf("dropped = %v, want the unknown session page", dropped)
+	}
+}
+
+// two incarnations of one session collapse onto the same path — the loser must
+// be reported, not silently overwritten at write time.
+func TestCanonicalizeSessionPathsDropsCollision(t *testing.T) {
+	pages := []wikiPage{
+		{Path: "sessions/s1.md", Title: "first", BodyMarkdown: "b"},
+		{Path: "sessions/s1-2.md", Title: "second", BodyMarkdown: "b"},
+	}
+	got, dropped := canonicalizeSessionPaths(pages, []string{"s1"})
+	if len(got) != 1 || got[0].Title != "first" {
+		t.Fatalf("got %+v, want only the first page", got)
+	}
+	if len(dropped) != 1 || !strings.Contains(dropped[0], "sessions/s1.md") {
+		t.Errorf("dropped = %v, want a collision reason naming the target", dropped)
+	}
+}
+
+// end to end: the processor names the page after the digest file, memoria pins
+// it back to the session id so run/recall/digest can still find it.
+func TestProcessPinsSessionPageToSessionID(t *testing.T) {
+	proj, cfgPath, digest := processFixture(t)
+	body := "---\nkind: session-digest\nsession_id: s1\n---\n\n@user-prompt 'redesign the day view'\n"
+	if err := os.WriteFile(digest, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stubProcessor(t, `{"pages":[{"path":"sessions/s1-2.md","title":"Day view","tags":[],"body_markdown":"# Day view\n\nwork\n"}]}`, nil)
+
+	var buf bytes.Buffer
+	if code := runProcess(proj, cfgPath, []string{"--foreground"}, &buf); code != 0 {
+		t.Fatalf("process = %d: %s", code, buf.String())
+	}
+	b, err := os.ReadFile(filepath.Join(proj, ".memoria", "proposal.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var prop proposal
+	if err := json.Unmarshal(b, &prop); err != nil {
+		t.Fatal(err)
+	}
+	if len(prop.Pages) != 1 || prop.Pages[0].Path != "sessions/s1.md" {
+		t.Fatalf("pages = %+v, want sessions/s1.md", prop.Pages)
+	}
+}
+
+// the processor runs for minutes; an agent still live in the project keeps
+// appending to a digest already flagged ended. Archiving it then would bury
+// events that were never in the prompt.
+func TestApplyKeepsDigestThatGrewDuringProcessing(t *testing.T) {
+	proj, cfgPath, digest := processFixture(t)
+	projName := filepath.Base(proj)
+	stubProcessor(t, goodProposalPages, nil)
+
+	var buf bytes.Buffer
+	if code := runProcess(proj, cfgPath, []string{"--foreground"}, &buf); code != 0 {
+		t.Fatalf("process = %d: %s", code, buf.String())
+	}
+	f, err := os.OpenFile(digest, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString("@post-tool-use Edit /p/late.go\n"); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+
+	buf.Reset()
+	if code := runProcess(proj, cfgPath, []string{"--apply"}, &buf); code != 0 {
+		t.Fatalf("apply = %d: %s", code, buf.String())
+	}
+	if _, err := os.Stat(filepath.Join(proj, "wiki", "concepts", "queue.md")); err != nil {
+		t.Fatalf("page not written: %v", err)
+	}
+	if _, err := os.Stat(digest); err != nil {
+		t.Errorf("digest archived despite growing: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(proj, ".memoria", "sessions", "processed", "s1.md")); !os.IsNotExist(err) {
+		t.Error("digest moved to processed/ despite growing")
+	}
+	q, err := loadQueue(queuePath(cfgPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, e := range q[projName] {
+		if e.Path == digest {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("queue entry dropped despite the digest growing")
+	}
+}
+
+// a proposal written before session_sizes existed carries no sizes — it must
+// still archive, not stall forever.
+func TestApplyArchivesProposalWithoutSizes(t *testing.T) {
+	proj, cfgPath, digest := processFixture(t)
+	prop := proposal{
+		Project:     filepath.Base(proj),
+		GeneratedAt: "2026-08-01T00:00:00-03:00",
+		Sessions:    []string{digest},
+		Pages:       []wikiPage{{Path: "concepts/queue.md", Title: "Queue", BodyMarkdown: "# Queue\n"}},
+	}
+	b, err := json.Marshal(prop)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), "session_sizes") {
+		t.Fatal("nil sizes must be omitted from the proposal")
+	}
+	if err := os.WriteFile(filepath.Join(proj, ".memoria", "proposal.json"), b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	if code := runProcess(proj, cfgPath, []string{"--apply"}, &buf); code != 0 {
+		t.Fatalf("apply = %d: %s", code, buf.String())
+	}
+	if _, err := os.Stat(filepath.Join(proj, ".memoria", "sessions", "processed", "s1.md")); err != nil {
+		t.Errorf("digest not archived: %v", err)
 	}
 }

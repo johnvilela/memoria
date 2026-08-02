@@ -51,6 +51,10 @@ type proposal struct {
 	GeneratedAt string     `json:"generated_at"`
 	Sessions    []string   `json:"sessions"`
 	Pages       []wikiPage `json:"pages"`
+	// digest byte length at the moment the prompt was built, so apply can tell
+	// whether a still-live session appended events the processor never saw.
+	// Absent in proposals written before this field existed.
+	Sizes map[string]int64 `json:"session_sizes,omitempty"`
 }
 
 // spawnDetached re-execs the CLI in its own session so long processor runs
@@ -217,7 +221,8 @@ func processAll(cfg config, configPath string, apply bool, out io.Writer) int {
 }
 
 // collectEnded returns the project's ended queue entries whose digest file
-// still exists, plus their contents.
+// still exists and carries content, plus their contents. Contentless digests
+// are retired on the way past.
 func collectEnded(qPath, projName string) (sessions []string, digests map[string]string, err error) {
 	queue, err := loadQueue(qPath)
 	if err != nil {
@@ -232,10 +237,120 @@ func collectEnded(qPath, projName string) (sessions []string, digests map[string
 		if err != nil {
 			continue // dead entry; the queue keeps it until someone cleans up
 		}
+		if !digestHasContent(string(b)) {
+			retireEmptyDigest(qPath, projName, e.Path)
+			continue
+		}
 		sessions = append(sessions, e.Path)
 		digests[e.Path] = string(b)
 	}
 	return sessions, digests, nil
+}
+
+// batchSessionIDs returns the session id of every digest in the batch, read
+// from frontmatter (authoritative — the filename carries an incarnation
+// suffix). Digests predating session_id contribute nothing and simply opt out
+// of canonicalization.
+func batchSessionIDs(sessions []string) []string {
+	var sids []string
+	for _, p := range sessions {
+		front, _ := parseDigest(p)
+		if sid := frontKey(front, "session_id"); sid != "" {
+			sids = append(sids, sid)
+		}
+	}
+	return sids
+}
+
+// canonicalizeSessionPaths pins each episodic page to its session id. The
+// processor names the page after the digest file often enough that the
+// incarnation suffix leaks through, and sessions/<sid>-2.md is invisible to
+// run, recall and digest — all three look up the bare id. Matching is against
+// the batch's known ids, never the shape of the name: a uuid can legitimately
+// end in "-400060889612".
+//
+// A sessions/ page naming no id in the batch is dropped. validPagePath waves
+// through any name under sessions/, so this is the only thing standing between
+// a processor typo and an orphan page nothing can find.
+func canonicalizeSessionPaths(pages []wikiPage, sids []string) (out []wikiPage, dropped []string) {
+	taken := map[string]bool{}
+	for _, p := range pages {
+		name, isSession := strings.CutPrefix(p.Path, "sessions/")
+		if !isSession {
+			out = append(out, p)
+			continue
+		}
+		name = strings.TrimSuffix(name, ".md")
+		match := ""
+		for _, sid := range sids {
+			if name == sid {
+				match = sid
+				break
+			}
+			// "<sid>-2", "<sid>-3", ... — an incarnation of a known session
+			if rest, ok := strings.CutPrefix(name, sid+"-"); ok && isDigits(rest) {
+				match = sid
+			}
+		}
+		if match == "" {
+			dropped = append(dropped, fmt.Sprintf("page %q dropped: names no session in this batch", p.Path))
+			continue
+		}
+		p.Path = "sessions/" + match + ".md"
+		if taken[p.Path] {
+			dropped = append(dropped, fmt.Sprintf("page %q dropped: another page already claims %s", p.Path, p.Path))
+			continue
+		}
+		taken[p.Path] = true
+		out = append(out, p)
+	}
+	return out, dropped
+}
+
+func isDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// digestHasContent reports whether a digest holds any event beyond the
+// session bookends. A session that starts and immediately ends — a resume the
+// user backs out of, an abandoned window — leaves only @session-start and
+// @session-end; asked to consolidate that, the processor rightly returns zero
+// pages, which the caller can only read as a hard failure.
+func digestHasContent(body string) bool {
+	for _, line := range strings.Split(body, "\n") {
+		if !strings.HasPrefix(line, "@") {
+			continue
+		}
+		switch name, _, _ := strings.Cut(line[1:], " "); name {
+		case "session-start", "session-end":
+		default:
+			return true
+		}
+	}
+	return false
+}
+
+// retireEmptyDigest clears a contentless digest out of the worklist — same
+// archive move a consumed session gets. Without it the entry rides along in
+// every later batch and keeps the project's status red. Best-effort: a digest
+// left behind is noise, never lost work.
+func retireEmptyDigest(qPath, projName, digestPath string) {
+	dst := filepath.Join(filepath.Dir(filepath.Dir(digestPath)), "processed", filepath.Base(digestPath))
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err == nil {
+		_ = os.Rename(digestPath, dst)
+	}
+	if err := queueRemove(qPath, projName, digestPath); err != nil {
+		logf("process", "%s: queue cleanup: %v", projName, err)
+	}
+	logf("process", "%s: retired empty digest %s", projName, filepath.Base(digestPath))
 }
 
 func generateProposal(cfg config, proj, wikiRoot, proposalPath, configPath, projName string, out io.Writer) int {
@@ -286,7 +401,11 @@ func generateProposal(cfg config, proj, wikiRoot, proposalPath, configPath, proj
 	if err := json.Unmarshal([]byte(jsonStr), &pp); err != nil {
 		return fail(fmt.Errorf("processor returned invalid JSON: %w", err))
 	}
-	pages, droppedPages := validatePages(pp.Pages, wikiRoot)
+	// pin session pages before the shared validator: it accepts any name under
+	// sessions/, and lint's fix pass legitimately edits pages outside a batch
+	proposed, droppedPages := canonicalizeSessionPaths(pp.Pages, batchSessionIDs(sessions))
+	pages, dropped := validatePages(proposed, wikiRoot)
+	droppedPages = append(droppedPages, dropped...)
 	for _, d := range droppedPages {
 		fmt.Fprintln(out, "warning:", d)
 		logf("process", "%s: warning: %s", projName, d)
@@ -299,11 +418,16 @@ func generateProposal(cfg config, proj, wikiRoot, proposalPath, configPath, proj
 		droppedNote = fmt.Sprintf(" — dropped %d invalid page(s)", len(droppedPages))
 	}
 
+	sizes := make(map[string]int64, len(sessions))
+	for _, s := range sessions {
+		sizes[s] = int64(len(digests[s]))
+	}
 	prop := proposal{
 		Project:     projName,
 		GeneratedAt: time.Now().Format(time.RFC3339),
 		Sessions:    sessions,
 		Pages:       pages,
+		Sizes:       sizes,
 	}
 	b, err := json.MarshalIndent(prop, "", "  ")
 	if err != nil {
@@ -373,15 +497,27 @@ func applyProposal(cfg config, proj, wikiRoot, proposalPath, qPath, projName str
 		fmt.Fprintln(out, "error:", err)
 		return 1
 	}
+	archived := 0
 	for _, s := range prop.Sessions {
 		// only move files that live inside this project
 		if !strings.HasPrefix(s, proj+string(filepath.Separator)) {
+			continue
+		}
+		if !digestConsumed(s, prop.Sizes) {
+			// a session still live in this project appended while the
+			// processor ran — those events were never in the prompt. Leave it
+			// queued so the next pass consolidates the whole digest.
+			// ponytail: costs one re-consolidation; a session that never stops
+			// emitting keeps deferring its archive but gets a fresh page each pass.
+			fmt.Fprintf(out, "kept %s — grew during processing, will reprocess\n", filepath.Base(s))
+			logf("process", "%s: kept growing digest %s", projName, filepath.Base(s))
 			continue
 		}
 		_ = os.Rename(s, filepath.Join(processedDir, filepath.Base(s)))
 		if err := queueRemove(qPath, projName, s); err != nil {
 			fmt.Fprintln(out, "warning: queue cleanup:", err)
 		}
+		archived++
 	}
 	_ = os.Remove(proposalPath)
 	paths := make([]string, len(prop.Pages))
@@ -389,9 +525,25 @@ func applyProposal(cfg config, proj, wikiRoot, proposalPath, qPath, projName str
 		paths[i] = pg.Path
 	}
 	commitWiki(cfg, wikiRoot, "apply proposal", pageSummary(paths), len(paths))
-	fmt.Fprintf(out, "Applied %d page(s); %d session(s) moved to processed/\n", len(prop.Pages), len(prop.Sessions))
-	logf("process", "%s: applied %d pages, %d sessions processed", projName, len(prop.Pages), len(prop.Sessions))
+	fmt.Fprintf(out, "Applied %d page(s); %d session(s) moved to processed/\n", len(prop.Pages), archived)
+	logf("process", "%s: applied %d pages, %d sessions processed", projName, len(prop.Pages), archived)
 	return 0
+}
+
+// digestConsumed reports whether the digest still holds exactly what the
+// prompt was built from. Digests are append-only, so a byte-length match is
+// conclusive — no clock, no mtime granularity. A proposal predating Sizes has
+// no entry and is trusted, as are digests outside the map.
+func digestConsumed(path string, sizes map[string]int64) bool {
+	want, ok := sizes[path]
+	if !ok {
+		return true
+	}
+	fi, err := os.Stat(path)
+	if err != nil {
+		return true // gone already; the rename is a no-op either way
+	}
+	return fi.Size() == want
 }
 
 // validatePages is the trust boundary for LLM output: valid paths only (see
