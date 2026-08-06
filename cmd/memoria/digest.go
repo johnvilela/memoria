@@ -2,7 +2,6 @@ package main
 
 import (
 	_ "embed"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -113,17 +112,14 @@ func digestForeground(cfg config, proj, wikiRoot, configPath, projName, sid stri
 	if err != nil {
 		return fail(err)
 	}
-	jsonStr, err := extractJSON(raw)
-	if err != nil {
-		return fail(err)
-	}
 	var pg struct {
 		Title        string   `json:"title"`
 		BodyMarkdown string   `json:"body_markdown"`
 		Tags         []string `json:"tags"`
 	}
-	if err := json.Unmarshal([]byte(jsonStr), &pg); err != nil {
-		return fail(fmt.Errorf("processor returned invalid JSON: %w", err))
+	repaired, err := parseProcessorJSON(raw, proj, "digest", out, &pg)
+	if err != nil {
+		return fail(err)
 	}
 	if pg.Title == "" || pg.BodyMarkdown == "" {
 		return fail(fmt.Errorf("processor returned empty title or body_markdown"))
@@ -141,7 +137,11 @@ func digestForeground(cfg config, proj, wikiRoot, configPath, projName, sid stri
 	rel := "sessions/" + sid + ".md"
 	commitWiki(cfg, wikiRoot, "session digest", rel, 1)
 	fmt.Fprintf(out, "wrote %s\n", pagePath)
-	if serr := statusSet(statusPath(configPath), projName, "done", 0, "session page written: "+rel); serr != nil {
+	detail := "session page written: " + rel
+	if repaired {
+		detail += " — output repaired"
+	}
+	if serr := statusSet(statusPath(configPath), projName, "done", 0, detail); serr != nil {
 		logf("digest", "%s: status: %v", projName, serr)
 	}
 	notify(cfg, "memoria", projName+": session page updated — "+rel)

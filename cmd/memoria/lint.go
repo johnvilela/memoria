@@ -20,7 +20,8 @@ var defaultLintPrompt string
 // can't break parsing
 const lintContract = `Output ONLY a JSON object, no code fences, no commentary:
 {"findings":[{"kind":"contradiction"|"stale"|"duplicate","severity":"warning"|"info","message":"...","pages":["path/a.md","path/b.md"]}]}
-"findings" may be []. Page paths verbatim from the input.`
+"findings" may be []. Page paths verbatim from the input.
+Escape every " inside a string value as \" and every newline as \n.`
 
 const lintFixPrompt = `You resolve lint findings in a personal coding-knowledge wiki.
 Given the findings and the full content of the pages involved, return the
@@ -31,7 +32,8 @@ fully duplicated elsewhere. Only touch the pages listed in the findings.
 Output ONLY a JSON object, no code fences, no commentary:
 {"pages":[{"action":"update"|"create"|"delete","path":"...","title":"...","content":"full markdown"}]}
 "path" is relative to the wiki root. "delete" moves the page to trash/ and
-needs only "path"; every other action needs a non-empty title and content.`
+needs only "path"; every other action needs a non-empty title and content.
+Escape every " inside "content" as \" and every newline as \n — one raw quote breaks the whole fix.`
 
 type lintFinding struct {
 	Kind     string   `json:"kind"`
@@ -161,15 +163,16 @@ func generateLintReport(cfg config, configPath, wikiRoot, lintPath, deniedPath, 
 	if err != nil {
 		return fail(err)
 	}
-	jsonStr, err := extractJSON(raw)
-	if err != nil {
-		return fail(err)
-	}
 	var rep struct {
 		Findings []lintFinding `json:"findings"`
 	}
-	if err := json.Unmarshal([]byte(jsonStr), &rep); err != nil {
-		return fail(fmt.Errorf("processor returned invalid JSON: %w", err))
+	repaired, err := parseProcessorJSON(raw, filepath.Dir(wikiRoot), "lint", out, &rep)
+	if err != nil {
+		return fail(err)
+	}
+	repairedNote := ""
+	if repaired {
+		repairedNote = " — output repaired"
 	}
 	if err := validateFindings(rep.Findings, wiki); err != nil {
 		return fail(err)
@@ -177,7 +180,7 @@ func generateLintReport(cfg config, configPath, wikiRoot, lintPath, deniedPath, 
 	if len(rep.Findings) == 0 {
 		_ = os.Remove(lintPath) // a clean run invalidates any older report
 		fmt.Fprintln(out, "No conflicts found — the wiki is internally consistent.")
-		done("lint: no conflicts found")
+		done("lint: no conflicts found" + repairedNote)
 		notify(cfg, "memoria", "Lint clean for "+projName+" — no conflicts found")
 		return 0
 	}
@@ -203,13 +206,13 @@ func generateLintReport(cfg config, configPath, wikiRoot, lintPath, deniedPath, 
 			// report stays on disk for manual lint --review / --apply
 			return fail(fmt.Errorf("lint auto-fix failed — report kept for review"))
 		}
-		done(fmt.Sprintf("lint: applied fixes for %d finding(s)", len(rep.Findings)))
+		done(fmt.Sprintf("lint: applied fixes for %d finding(s)", len(rep.Findings)) + repairedNote)
 		notify(cfg, "memoria", fmt.Sprintf("Lint fixed %d finding(s) for %s", len(rep.Findings), projName))
 		return 0
 	}
 	printFindings(out, rep.Findings)
 	fmt.Fprintln(out, "Review with: memoria lint --review — resolve with: memoria lint --apply — reject with: memoria lint --deny \"why\"")
-	done(fmt.Sprintf("lint report ready: %d finding(s) — review with memoria lint --review", len(rep.Findings)))
+	done(fmt.Sprintf("lint report ready: %d finding(s) — review with memoria lint --review", len(rep.Findings)) + repairedNote)
 	notify(cfg, "memoria", fmt.Sprintf("Lint found %d conflict(s) in %s — review with memoria lint --review", len(rep.Findings), projName))
 	logf("lint", "%s: %d findings in %s", projName, len(rep.Findings), lintPath)
 	return 0
@@ -253,16 +256,11 @@ func lintApply(cfg config, wikiRoot, lintPath string, out io.Writer) int {
 		fmt.Fprintln(out, "error:", err)
 		return 1
 	}
-	jsonStr, err := extractJSON(raw)
-	if err != nil {
-		fmt.Fprintln(out, "error:", err)
-		return 1
-	}
 	var fix struct {
 		Pages []lintPage `json:"pages"`
 	}
-	if err := json.Unmarshal([]byte(jsonStr), &fix); err != nil {
-		fmt.Fprintln(out, "error: processor returned invalid JSON:", err)
+	if _, err := parseProcessorJSON(raw, filepath.Dir(wikiRoot), "lint", out, &fix); err != nil {
+		fmt.Fprintln(out, "error:", err)
 		return 1
 	}
 	pages, dropped := validateLintFix(fix.Pages, findings, wikiRoot)

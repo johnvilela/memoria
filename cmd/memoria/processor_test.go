@@ -92,22 +92,23 @@ func TestInvokeProcessorCodexNonGitSkipsCheck(t *testing.T) {
 	}
 }
 
-// Wiki work is text digestion — claude defaults to haiku, and
-// processor_model/processor_effort override the defaults.
+// Wiki work is text digestion, but it has to escape quote-heavy markdown into
+// JSON — claude defaults to sonnet, and processor_model/processor_effort
+// override the defaults.
 func TestInvokeProcessorModelFlags(t *testing.T) {
 	stubProcessorBin(t, "claude")
 	out, err := invokeProcessor(config{Processor: "claude-code"}, "", "hi")
 	if err != nil {
 		t.Fatalf("claude: %v", err)
 	}
-	if !strings.Contains(out, "--model haiku") {
-		t.Fatalf("claude should default to haiku: %q", out)
+	if !strings.Contains(out, "--model sonnet") {
+		t.Fatalf("claude should default to sonnet: %q", out)
 	}
-	out, err = invokeProcessor(config{Processor: "claude-code", ProcessorModel: "sonnet"}, "", "hi")
+	out, err = invokeProcessor(config{Processor: "claude-code", ProcessorModel: "haiku"}, "", "hi")
 	if err != nil {
 		t.Fatalf("claude: %v", err)
 	}
-	if !strings.Contains(out, "--model sonnet") {
+	if !strings.Contains(out, "--model haiku") {
 		t.Fatalf("processor_model should override: %q", out)
 	}
 

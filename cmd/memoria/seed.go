@@ -2,7 +2,6 @@ package main
 
 import (
 	_ "embed"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -138,16 +137,12 @@ func seedWiki(cfg config, dir, wikiRoot, configPath string, out io.Writer) (stri
 	if err != nil {
 		return "", err
 	}
-	jsonStr, err := extractJSON(raw)
-	if err != nil {
-		return "", err
-	}
 	var pp struct {
 		Pages     []wikiPage `json:"pages"`
 		Rationale string     `json:"rationale"`
 	}
-	if err := json.Unmarshal([]byte(jsonStr), &pp); err != nil {
-		return "", fmt.Errorf("processor returned invalid JSON: %w", err)
+	if _, err := parseProcessorJSON(raw, dir, "seed", out, &pp); err != nil {
+		return "", err
 	}
 	pages, dropped := validatePages(pp.Pages, wikiRoot)
 	for _, d := range dropped {

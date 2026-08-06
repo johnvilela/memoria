@@ -17,7 +17,7 @@ type project struct {
 type config struct {
 	Projects          []project `yaml:"projects"`
 	Processor         string    `yaml:"processor,omitempty"`           // AI provider that processes sessions into wiki/memories
-	ProcessorModel    string    `yaml:"processor_model,omitempty"`     // model for the CLI processors; empty = cheap default (haiku / gpt-5.4.mini)
+	ProcessorModel    string    `yaml:"processor_model,omitempty"`     // model for the CLI processors; empty = default (sonnet / gpt-5.4.mini)
 	ProcessorEffort   string    `yaml:"processor_effort,omitempty"`    // codex reasoning effort; empty = high
 	WikiCommitMessage string    `yaml:"wiki_commit_message,omitempty"` // pattern for wiki auto-commits; placeholders {action} {summary} {count} {project}
 	WikiAutoCommit    bool      `yaml:"wiki_auto_commit,omitempty"`    // commit the wiki after every applied write; off = commit it yourself with memoria commit

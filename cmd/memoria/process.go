@@ -28,7 +28,8 @@ const jsonContract = `Output ONLY a ConsolidatedBatch JSON object, no code fence
 "path" is relative to the wiki root, always ending in .md. Valid targets: "index.md", the suggested categories concepts/, decisions/, gotchas/, rules/, sessions/, and any other top-level folder already present in the CURRENT WIKI section. Do NOT invent new top-level folders; trash/, _global/ and dot-folders are reserved.
 The episodic session page goes at "sessions/<session_id>.md" (session_id from the digest frontmatter).
 "body_markdown" is the page body without frontmatter — memoria writes the tags frontmatter itself.
-"tags" are 0-5 short kebab-case tags. 1-5 pages.`
+"tags" are 0-5 short kebab-case tags. 1-5 pages.
+Escape every " inside a string value as \" and every newline as \n — one raw quote in a body breaks the whole batch.`
 
 type wikiPage struct {
 	Path         string   `json:"path"`
@@ -391,15 +392,12 @@ func generateProposal(cfg config, proj, wikiRoot, proposalPath, configPath, proj
 	if err != nil {
 		return fail(err)
 	}
-	jsonStr, err := extractJSON(raw)
-	if err != nil {
-		return fail(err)
-	}
 	var pp struct {
 		Pages []wikiPage `json:"pages"`
 	}
-	if err := json.Unmarshal([]byte(jsonStr), &pp); err != nil {
-		return fail(fmt.Errorf("processor returned invalid JSON: %w", err))
+	repaired, err := parseProcessorJSON(raw, proj, "process", out, &pp)
+	if err != nil {
+		return fail(err)
 	}
 	// pin session pages before the shared validator: it accepts any name under
 	// sessions/, and lint's fix pass legitimately edits pages outside a batch
@@ -416,6 +414,9 @@ func generateProposal(cfg config, proj, wikiRoot, proposalPath, configPath, proj
 	droppedNote := ""
 	if len(droppedPages) > 0 {
 		droppedNote = fmt.Sprintf(" — dropped %d invalid page(s)", len(droppedPages))
+	}
+	if repaired {
+		droppedNote += " — output repaired"
 	}
 
 	sizes := make(map[string]int64, len(sessions))
@@ -705,12 +706,3 @@ func continuationNote(digest string, wiki map[string]string) string {
 		" Do not re-summarize it shorter.)", sid, page)
 }
 
-// extractJSON tolerates fences/chatter around the object.
-func extractJSON(s string) (string, error) {
-	i := strings.Index(s, "{")
-	j := strings.LastIndex(s, "}")
-	if i < 0 || j <= i {
-		return "", fmt.Errorf("no JSON object in processor output (%d bytes)", len(s))
-	}
-	return s[i : j+1], nil
-}

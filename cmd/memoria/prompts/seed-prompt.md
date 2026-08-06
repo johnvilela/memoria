@@ -118,3 +118,6 @@ Reply with ONE JSON object matching this exact schema:
   the entire reply is the JSON object.
 - Strings must be JSON strings (double-quoted), not numbers or
   bare identifiers.
+- Escape every `"` inside `body_markdown` as `\"` and every
+  newline as `\n`. One raw quote in a body breaks the whole
+  reply.

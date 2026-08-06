@@ -28,7 +28,10 @@ var invokeProcessor = func(cfg config, dir, prompt string) (string, error) {
 	case "claude-code":
 		model := cfg.ProcessorModel
 		if model == "" {
-			model = "haiku" // wiki work is text digestion — cheap model suffices
+			// haiku is cheaper but drops backslashes escaping quote-heavy page
+			// bodies often enough to cost whole batches — parseProcessorJSON
+			// repairs those, this stops most of them happening
+			model = "sonnet"
 		}
 		return runProcessorCmd("claude", []string{"-p", "--model", model}, os.TempDir(), prompt)
 	case "codex":
