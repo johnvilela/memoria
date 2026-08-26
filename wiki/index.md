@@ -15,7 +15,7 @@ Start with [[concepts/architecture-overview]] for the pipeline end to end.
 - [[concepts/multirepo-parent-project]] — how memoria behaves on a multirepo parent folder; the eparts verdict — adaptations shipped as `31b7251`
 - [[concepts/handoff-vs-ai-memory]] — research: ai-memory's deterministic workstream handoff vs memoria's — spawned the packet handoff (`ad5d206`)
 - [[concepts/processor-directory-trust]] — per-provider cwd handling for the CLI processors (codex, claude); git-trust fix `dc9c30f`
-- [[concepts/processor-models-and-effort]] — configurable model/effort for cheaper wiki work (haiku/gpt-5.4.mini by default)
+- [[concepts/processor-models-and-effort]] — configurable model/effort for cheaper wiki work (sonnet/gpt-5.4.mini by default; claude moved off haiku after `6f653b9`)
 - [[concepts/wiki-auto-commit]] — how wiki commits are built; opt-in for applies, always for `memoria commit`
 - [[concepts/queue-write-safety]] — file locking and atomic operations protect queue and status files from concurrent writes
 - [[research/ai-memory-workstream-comparison]] — external (chatgpt) deep-dive on ai-memory v1.19.2 that fed the `run` rework
@@ -30,6 +30,7 @@ Start with [[concepts/architecture-overview]] for the pipeline end to end.
 - [[decisions/0006-wiki-auto-commit-on-apply]] — applied wiki changes auto-commit when inside a git repo (default reversed by 0010)
 - [[decisions/0007-queue-safety-via-file-locking]] — file locking for queue writes, not append-only redesign
 - [[decisions/0010-wiki-auto-commit-is-opt-in]] — auto-commit off by default; `memoria commit` is the manual path
+- [[decisions/0011-deterministic-json-repair-over-retry]] — malformed processor JSON gets a deterministic byte-level repair pass instead of losing the whole batch
 
 ## Gotchas — what bit us
 
@@ -41,6 +42,7 @@ Start with [[concepts/architecture-overview]] for the pipeline end to end.
 - [[gotchas/auto-apply-rewrites-wiki-mid-session]] — background auto-apply consolidation can modify `wiki/` while a session is running
 - [[gotchas/subagent-stop-promoted-to-user-request]] — handoff auto-ran a subagent's internal note; ask-first since `6414c80`
 - [[gotchas/codex-refuses-untrusted-directories]] — codex exec refuses to run outside git repos or trusted paths; fixed in `dc9c30f`
+- [[gotchas/processor-json-parse-failures]] — cheap-model quote-escaping bugs silently poisoned whole consolidation batches; fixed by deterministic repair in `6f653b9`
 
 ## Sessions — the episodic log
 
@@ -66,3 +68,8 @@ Start with [[concepts/architecture-overview]] for the pipeline end to end.
 - [[sessions/16f159dc-d22a-413f-a3e4-c02ceb22b9cc]] — queue write race condition fixed with file locking (`0f961a7`)
 - [[sessions/756f94c9-e579-493d-a839-76f7fa29eab3.md]] — first release: v0.7.0 tagged, `memoria version` subcommand, release ritual documented
 - [[sessions/29f4cf2e-fb32-47d3-9fb3-595ab07b17e7]] — curl installer script, init PATH detection, module-path mismatch fixed — `0e9c164`
+- [[sessions/1ac019b3-5e9e-468e-a503-db42b7fa7ffd]] — stale prompt override + empty-digest + session-path canonicalization fixes, apply-time race detection and continuation marker
+- [[sessions/4911da88-3f02-4f70-a22a-45a5405242df]] — wiki auto-commit made opt-in, `memoria commit` shipped, four consolidation bugs fixed
+- [[sessions/019fc03b-ce00-7cc2-b8f4-fb706df1f37d]] — from-scratch Memoria evaluation plus ai-memory v1.22.0 flaw-handling comparison
+- [[sessions/b978ee64-4761-45b0-ada9-beb4fc8b02a9]] — research wiki pages committed: `e4a83e0`
+- [[sessions/61bd82ab-125a-4915-90cc-bdd5135716df]] — processor JSON repair shipped: `6f653b9`, malformed batches now get a deterministic repair pass instead of being lost
