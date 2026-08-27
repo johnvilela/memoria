@@ -26,10 +26,12 @@ Differentiator vs. existing solutions: hooks + cronjobs + markdown files, human-
 - **TDD**: write tests first for every feature, confirm red, then implement to green.
 - Docs, help text, and code in English.
 - Help screen lists only real commands; planned commands are tagged "coming soon".
+- **Version bump on every code PR**: any PR touching `*.go`/`go.mod` must bump `const version` in `cmd/memoria/main.go` (CI blocks the merge otherwise; semver per `wiki/skills/release-ritual.md`). Never tag or `gh release create` by hand — merging to main tags `v<version>` and publishes the release automatically.
+- Main is protected: no direct pushes — branch, PR, green checks, merge.
 
 ## Scripts
 
-- `scripts/build.sh` — host binary at `./memoria`; `scripts/build.sh all` → `dist/` for linux/darwin × amd64/arm64
+- `scripts/build.sh` — host binary at `./memoria`; `scripts/build.sh all` → `dist/` for linux/darwin × amd64/arm64 (windows pending a syscall port)
 - `scripts/install.sh` — installs to `$BIN_DIR` (default `~/.local/bin`); in-repo builds local checkout, standalone go-installs `@latest` (curl-able from github later)
 - `scripts/test.sh` — `go vet` + `go test -race`, extra args pass through (`scripts/test.sh -v -run TestX`)
 - `scripts/dev.sh` — dev loop: build the local checkout and install to `$BIN_DIR` (wraps `install.sh`)
