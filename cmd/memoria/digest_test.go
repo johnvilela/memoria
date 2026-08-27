@@ -128,3 +128,59 @@ func TestDigestRejectsBadSid(t *testing.T) {
 		t.Fatalf("bad sid accepted: %d", code)
 	}
 }
+
+func TestDigestUnregisteredCwdUsesGlobal(t *testing.T) {
+	root, cfgPath, _ := globalProcessFixture(t, "")
+	stubProcessor(t, `{"title":"Fix the thing","body_markdown":"fixed it\n","tags":[]}`, nil)
+	commits := stubCommitWiki(t)
+	var buf bytes.Buffer
+	if code := runDigest(t.TempDir(), cfgPath, []string{"g1", "--foreground"}, &buf); code != 0 {
+		t.Fatalf("digest = %d: %s", code, buf.String())
+	}
+	if _, err := os.Stat(filepath.Join(root, "wiki", "sessions", "g1.md")); err != nil {
+		t.Fatalf("session page not under the global wiki: %v", err)
+	}
+	st, _ := loadStatus(statusPath(cfgPath))
+	if st[globalName].State != "done" {
+		t.Fatalf("status = %+v, want done under %s", st, globalName)
+	}
+	// default global root: the wiki is its own repo and always commits
+	if len(*commits) != 1 || !(*commits)[0] {
+		t.Fatalf("commitWiki calls = %v, want one with WikiAutoCommit=true", *commits)
+	}
+}
+
+func TestDigestGlobalPathNeverCommits(t *testing.T) {
+	root, cfgPath, _ := globalProcessFixture(t, t.TempDir())
+	stubProcessor(t, `{"title":"Fix the thing","body_markdown":"fixed it\n","tags":[]}`, nil)
+	commits := stubCommitWiki(t)
+	var buf bytes.Buffer
+	if code := runDigest(t.TempDir(), cfgPath, []string{"g1", "--foreground"}, &buf); code != 0 {
+		t.Fatalf("digest = %d: %s", code, buf.String())
+	}
+	if _, err := os.Stat(filepath.Join(root, "wiki", "sessions", "g1.md")); err != nil {
+		t.Fatalf("session page not under the custom global root: %v", err)
+	}
+	// custom global_path: the user's folder, git never touched
+	if len(*commits) != 1 || (*commits)[0] {
+		t.Fatalf("commitWiki calls = %v, want one with WikiAutoCommit=false", *commits)
+	}
+}
+
+func TestDigestDetachGlobal(t *testing.T) {
+	_, cfgPath, _ := globalProcessFixture(t, "")
+	spawned := stubSpawn(t, 4242)
+	unreg := t.TempDir()
+	var buf bytes.Buffer
+	if code := runDigest(unreg, cfgPath, []string{"g1"}, &buf); code != 0 {
+		t.Fatalf("digest = %d: %s", code, buf.String())
+	}
+	want := []string{unreg, "digest", "g1", "--foreground"}
+	if strings.Join(*spawned, " ") != strings.Join(want, " ") {
+		t.Fatalf("spawned %v, want %v", *spawned, want)
+	}
+	st, _ := loadStatus(statusPath(cfgPath))
+	if st[globalName].State != "running" || st[globalName].PID != 4242 {
+		t.Fatalf("status = %+v, want running 4242 under %s", st, globalName)
+	}
+}
