@@ -33,7 +33,7 @@ Differentiator vs. existing solutions: hooks + cronjobs + markdown files, human-
 
 - `scripts/build.sh` — host binary at `./memoria`; `scripts/build.sh all` → `dist/` for linux/darwin × amd64/arm64 (windows pending a syscall port)
 - `scripts/install.sh` — installs to `$BIN_DIR` (default `~/.local/bin`); in-repo builds local checkout, standalone go-installs `@latest` (curl-able from github later)
-- `scripts/test.sh` — `go vet` + `go test -race`, extra args pass through (`scripts/test.sh -v -run TestX`)
+- `scripts/test.sh` — `go vet` + `go test -race` via gotestsum (testdox: ✓ per scenario), extra args pass through (`scripts/test.sh -run TestX`)
 - `scripts/dev.sh` — dev loop: build the local checkout and install to `$BIN_DIR` (wraps `install.sh`)
 
 ## Commands
