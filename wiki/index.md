@@ -19,6 +19,8 @@ Start with [[concepts/architecture-overview]] for the pipeline end to end.
 - [[concepts/processor-models-and-effort]] — configurable model/effort for cheaper wiki work (sonnet/gpt-5.4.mini by default; claude moved off haiku after `6f653b9`)
 - [[concepts/wiki-auto-commit]] — how wiki commits are built; opt-in for applies, always for `memoria commit`
 - [[concepts/queue-write-safety]] — file locking and atomic operations protect queue and status files from concurrent writes
+- [[concepts/ci-release-pipeline]] — GitHub Actions CI/release pipeline: version-check gate, auto-tag + auto-release on merge, gotestsum vitest-style test output — shipped v0.8.0/v0.8.1
+- [[concepts/self-update-command]] — `memoria update`: checks GitHub releases, checksum-verifies, self-replaces the running binary; release binaries trimmed ~15MB→~10MB via `-ldflags="-s -w"` — shipped on `feat/update-command`, no PR yet
 - [[research/ai-memory-workstream-comparison]] — external (chatgpt) deep-dive on ai-memory v1.19.2 that fed the `run` rework
 
 ## Decisions — why it's shaped this way
@@ -32,6 +34,11 @@ Start with [[concepts/architecture-overview]] for the pipeline end to end.
 - [[decisions/0007-queue-safety-via-file-locking]] — file locking for queue writes, not append-only redesign
 - [[decisions/0010-wiki-auto-commit-is-opt-in]] — auto-commit off by default; `memoria commit` is the manual path
 - [[decisions/0011-deterministic-json-repair-over-retry]] — malformed processor JSON gets a deterministic byte-level repair pass instead of losing the whole batch
+- [[decisions/0012-ci-cd-release-pipeline]] — automate release on merge to main, protect main with a no-bypass GitHub ruleset; Windows dropped from release targets
+
+## Skills — how-to references
+
+- [[skills/release-ritual]] — how to cut a release: pick version, bump const, PR, merge (mechanics automated since `decisions/0012`)
 
 ## Gotchas — what bit us
 
@@ -66,7 +73,7 @@ Start with [[concepts/architecture-overview]] for the pipeline end to end.
 - [[sessions/e112664f-9954-4d8e-8fd2-a11e13d66bc0]] — handoff made ask-first (`6414c80`); multirepo assessment for eparts, adaptations committed as `31b7251` in incarnation 2
 - [[sessions/c133e40b-8547-4a99-bc98-d14b7029ccfe]] — codex git-trust fix, processor model config, wiki auto-commit — `dc9c30f` + `f0bf53a`
 - [[sessions/44c49197-2dea-4615-8ec2-27849c744218]] — open wiki folders with drop-and-warn validation (`06c9311`)
-- [[sessions/16f159dc-d22a-413f-a3e4-c02ceb22b9cc]] — queue write race condition fixed with file locking (`0f961a7`)
+- [[sessions/16f159dc-d22a-413f-a839-76f7fa29eab3]] — queue write race condition fixed with file locking (`0f961a7`)
 - [[sessions/756f94c9-e579-493d-a839-76f7fa29eab3.md]] — first release: v0.7.0 tagged, `memoria version` subcommand, release ritual documented
 - [[sessions/29f4cf2e-fb32-47d3-9fb3-595ab07b17e7]] — curl installer script, init PATH detection, module-path mismatch fixed — `0e9c164`
 - [[sessions/1ac019b3-5e9e-468e-a503-db42b7fa7ffd]] — stale prompt override + empty-digest + session-path canonicalization fixes, apply-time race detection and continuation marker
@@ -76,3 +83,5 @@ Start with [[concepts/architecture-overview]] for the pipeline end to end.
 - [[sessions/61bd82ab-125a-4915-90cc-bdd5135716df]] — processor JSON repair shipped: `6f653b9`, malformed batches now get a deterministic repair pass instead of being lost
 - [[sessions/19c76dfd-1284-48fa-bbba-486b6f7d66f0]] — `--global`/`--global-path` bootstrap flags requested; recon only, no decision yet → implemented the same day as `8e495d5` ([[sessions/266a3d10-ad0c-44f1-86f7-379941908fbf]])
 - [[sessions/266a3d10-ad0c-44f1-86f7-379941908fbf]] — global capture mode shipped: `8e495d5` — `bootstrap --global`/`--global-path`, `setup --global`, `_global` pseudo-project
+- [[sessions/e7535e5e-c210-4029-8496-3ab3c84ea9dd]] — release pipeline shipped: v0.8.0 (CI/CD + branch protection) and v0.8.1 (vitest-style test output)
+- [[sessions/6f2b7832-1db8-4e7a-a2c0-ca0cc207e4c8]] — `memoria update` self-update command + release-binary install script shipped on `feat/update-command` (no PR yet); release binaries trimmed ~15MB→~10MB via `-ldflags="-s -w"`

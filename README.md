@@ -12,7 +12,7 @@ Inspired by Fabio Akita's ai-memory and Andrej Karpathy's LLM wiki idea.
 curl -sS https://raw.githubusercontent.com/johnvilela/memoria/main/scripts/install.sh | sh
 ```
 
-The script detects your OS and shell, installs the binary to `~/.local/bin` (needs Go), then runs `memoria init` — which itself adapts to the platform (systemd timer on Linux, launchd agent on macOS) and to the agents it finds installed (Claude Code, Codex).
+The script downloads the latest release binary for your platform (checksum-verified, no Go needed) to `~/.local/bin`, then runs `memoria init` — which itself adapts to the platform (systemd timer on Linux, launchd agent on macOS) and to the agents it finds installed (Claude Code, Codex). Later, `memoria update` upgrades it in place.
 
 Or manually:
 
@@ -64,6 +64,7 @@ memoria run codex          # launch an agent, pick a session to continue
 | `search [--trash] <text \| #tag>` | Find wiki pages by content substring or frontmatter tag and print the chosen one; trashed pages stay hidden unless `--trash` |
 | `commit [-m "subject"]` | Commit the project's wiki folder — new and modified pages only, message in the same `docs(wiki): ...` shape, your other staged files untouched |
 | `status` | Show background processing state per project (running / done / error) |
+| `update [-y]` | Check GitHub for a newer release; shows the version and changelog, asks to install, then replaces the binary in place (sha256-verified). `-y` skips the prompt (and is the non-interactive path) |
 | `mcp` | Internal — stdio MCP server for agents (see below) |
 | `digest <sid>` | Internal — compile one session's digest into its `sessions/<sid>.md` wiki page |
 | `hook <name>` | Internal — called by agent hooks to capture session data |

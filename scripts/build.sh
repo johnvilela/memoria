@@ -10,7 +10,8 @@ if [ "${1:-}" = "all" ]; then
     for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64; do
         os=${target%/*} arch=${target#*/}
         out="dist/memoria_${os}_${arch}"
-        GOOS=$os GOARCH=$arch CGO_ENABLED=0 go build -trimpath -o "$out" ./cmd/memoria
+        # -s -w strips symbol table + DWARF (~1/3 smaller); panic traces keep names via pclntab
+        GOOS=$os GOARCH=$arch CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o "$out" ./cmd/memoria
         echo "built $out"
     done
 else
