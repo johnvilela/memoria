@@ -10,8 +10,10 @@ import (
 )
 
 // runSearch finds wiki pages by content substring, or by frontmatter tag when
-// the query starts with '#', then lets the user pick one to print. Human-only:
-// agents get the same search through the MCP memoria_search tool.
+// the query starts with '#', then lets the user pick one to print. Resolves
+// like the MCP tools: project wiki inside a tracked project, global wiki
+// elsewhere when global mode is on. Headless (non-TTY) callers get the match
+// list instead of the interactive picker.
 func runSearch(cwd, configPath string, args []string, out io.Writer) int {
 	fs := flag.NewFlagSet("search", flag.ContinueOnError)
 	fs.SetOutput(out)
@@ -24,26 +26,12 @@ func runSearch(cwd, configPath string, args []string, out io.Writer) int {
 		fmt.Fprintln(out, "usage: memoria search [--trash] <text | #tag>")
 		return 1
 	}
-	if !isTTY() {
-		fmt.Fprintln(out, "error: search is interactive; run it in a terminal")
-		return 1
-	}
-	cfg, err := loadConfig(configPath)
+	_, _, _, wikiRoot, err := resolveWorkspace(cwd, configPath)
 	if err != nil {
 		fmt.Fprintln(out, "error:", err)
 		return 1
 	}
-	proj := matchProject(cwd, cfg.Projects)
-	if proj == "" {
-		fmt.Fprintln(out, "error: not inside a tracked project (run memoria bootstrap first)")
-		return 1
-	}
-	p := projectAt(cfg, proj)
-	wikiName := p.Wiki
-	if wikiName == "" {
-		wikiName = "wiki"
-	}
-	wiki := readWikiTrash(filepath.Join(proj, wikiName), *trash)
+	wiki := readWikiTrash(wikiRoot, *trash)
 	hits := searchWiki(wiki, query)
 	if len(hits) == 0 {
 		fmt.Fprintf(out, "No matches for %q\n", query)
@@ -51,6 +39,13 @@ func runSearch(cwd, configPath string, args []string, out io.Writer) int {
 	}
 	choice := hits[0]
 	if len(hits) > 1 {
+		if !isTTY() {
+			// headless callers get the sorted match list instead of a picker
+			for _, h := range hits {
+				fmt.Fprintln(out, h)
+			}
+			return 0
+		}
 		opts := make([]option, len(hits))
 		for i, h := range hits {
 			opts[i] = option{value: h, label: h}

@@ -63,15 +63,56 @@ func TestSearchWikiHashtag(t *testing.T) {
 	}
 }
 
-func TestRunSearchNonTTY(t *testing.T) {
+func TestRunSearchNonTTYListsMatches(t *testing.T) {
 	proj, cfgPath := searchFixture(t)
 	stubTTY(t, false)
 	var buf bytes.Buffer
-	if code := runSearch(proj, cfgPath, []string{"rocket"}, &buf); code != 1 {
-		t.Fatalf("non-tty = %d, want 1", code)
+	if code := runSearch(proj, cfgPath, []string{"engine"}, &buf); code != 0 {
+		t.Fatalf("non-tty multi-hit = %d, want 0: %s", code, buf.String())
 	}
-	if !strings.Contains(buf.String(), "terminal") {
-		t.Fatalf("should explain it needs a terminal: %q", buf.String())
+	if got, want := buf.String(), "concepts/engine.md\ngotchas/hashtags.md\n"; got != want {
+		t.Fatalf("non-tty multi-hit should list sorted paths, got %q want %q", got, want)
+	}
+}
+
+func TestRunSearchNonTTYSingleMatchPrintsContent(t *testing.T) {
+	proj, cfgPath := searchFixture(t)
+	stubTTY(t, false)
+	var buf bytes.Buffer
+	if code := runSearch(proj, cfgPath, []string{"sqlite"}, &buf); code != 0 {
+		t.Fatalf("non-tty single-hit = %d, want 0: %s", code, buf.String())
+	}
+	if !strings.Contains(buf.String(), "we picked yaml over sqlite") {
+		t.Fatalf("non-tty single hit should print the page: %q", buf.String())
+	}
+}
+
+func TestRunSearchNonTTYNoMatches(t *testing.T) {
+	proj, cfgPath := searchFixture(t)
+	stubTTY(t, false)
+	var buf bytes.Buffer
+	if code := runSearch(proj, cfgPath, []string{"warp", "drive"}, &buf); code != 1 {
+		t.Fatalf("non-tty no matches = %d, want 1", code)
+	}
+}
+
+func TestRunSearchGlobalFallback(t *testing.T) {
+	cfgPath := testGlobalConfig(t, "")
+	root := filepath.Dir(cfgPath)
+	page := filepath.Join(root, "wiki", "srcfolder", "concepts", "queue.md")
+	if err := os.MkdirAll(filepath.Dir(page), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(page, []byte("# Queue\n\nworkers pull jobs\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stubTTY(t, false)
+	var buf bytes.Buffer
+	if code := runSearch(t.TempDir(), cfgPath, []string{"workers"}, &buf); code != 0 {
+		t.Fatalf("global-mode search from unregistered cwd = %d, want 0: %s", code, buf.String())
+	}
+	if !strings.Contains(buf.String(), "workers pull jobs") {
+		t.Fatalf("should hit the global wiki: %q", buf.String())
 	}
 }
 
