@@ -13,6 +13,7 @@ Start with [[concepts/architecture-overview]] for the pipeline end to end.
 - [[concepts/init-setup-multi-agent]] — multi-agent hook/MCP install, the `clients:` registry in config
 - [[concepts/recall-and-run]] — bootstrap, AGENTS.md recall block, `run`'s session picker + cross-harness handoff packet (ask-first since `6414c80`), `search`
 - [[concepts/multirepo-parent-project]] — how memoria behaves on a multirepo parent folder; the eparts verdict — adaptations shipped as `31b7251`
+- [[concepts/global-capture-mode]] — `bootstrap --global`/`--global-path` and `setup --global`: capture sessions in unregistered folders into a `_global` pseudo-project — shipped `8e495d5`
 - [[concepts/handoff-vs-ai-memory]] — research: ai-memory's deterministic workstream handoff vs memoria's — spawned the packet handoff (`ad5d206`)
 - [[concepts/processor-directory-trust]] — per-provider cwd handling for the CLI processors (codex, claude); git-trust fix `dc9c30f`
 - [[concepts/processor-models-and-effort]] — configurable model/effort for cheaper wiki work (sonnet/gpt-5.4.mini by default; claude moved off haiku after `6f653b9`)
@@ -34,7 +35,7 @@ Start with [[concepts/architecture-overview]] for the pipeline end to end.
 
 ## Gotchas — what bit us
 
-- [[gotchas/hooks-global-capture-opt-in]] — hooks are global, capture needs `bootstrap`
+- [[gotchas/hooks-global-capture-opt-in]] — hooks are global, capture needs `bootstrap`; partially superseded by `bootstrap --global` (`8e495d5`)
 - [[gotchas/implicit-session-end]] — a new session ends the previous one; reopens spawn incarnations
 - [[gotchas/prompt-over-stdin-argv-limit]] — processor prompt goes over stdin (E2BIG)
 - [[gotchas/stale-prompt-overrides]] — old materialized prompt files silently pin prompts
@@ -73,3 +74,5 @@ Start with [[concepts/architecture-overview]] for the pipeline end to end.
 - [[sessions/019fc03b-ce00-7cc2-b8f4-fb706df1f37d]] — from-scratch Memoria evaluation plus ai-memory v1.22.0 flaw-handling comparison
 - [[sessions/b978ee64-4761-45b0-ada9-beb4fc8b02a9]] — research wiki pages committed: `e4a83e0`
 - [[sessions/61bd82ab-125a-4915-90cc-bdd5135716df]] — processor JSON repair shipped: `6f653b9`, malformed batches now get a deterministic repair pass instead of being lost
+- [[sessions/19c76dfd-1284-48fa-bbba-486b6f7d66f0]] — `--global`/`--global-path` bootstrap flags requested; recon only, no decision yet → implemented the same day as `8e495d5` ([[sessions/266a3d10-ad0c-44f1-86f7-379941908fbf]])
+- [[sessions/266a3d10-ad0c-44f1-86f7-379941908fbf]] — global capture mode shipped: `8e495d5` — `bootstrap --global`/`--global-path`, `setup --global`, `_global` pseudo-project
