@@ -10,6 +10,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/lipgloss/table"
 	"gopkg.in/yaml.v3"
 )
 
@@ -119,6 +121,35 @@ func pidAlive(pid int) bool {
 	return err == nil || err == syscall.EPERM
 }
 
+// Base ANSI colors so the palette follows the user's terminal theme.
+var (
+	statusOK   = lipgloss.NewStyle().Foreground(lipgloss.Color("2"))
+	statusErr  = lipgloss.NewStyle().Foreground(lipgloss.Color("1"))
+	statusBusy = lipgloss.NewStyle().Foreground(lipgloss.Color("3"))
+)
+
+// fmtWhen turns an RFC3339 stamp into "Aug 21 12:02 (5d ago)"; unparseable
+// input is returned as-is.
+func fmtWhen(stamp string) string {
+	t, err := time.Parse(time.RFC3339, stamp)
+	if err != nil {
+		return stamp
+	}
+	age := time.Since(t)
+	var rel string
+	switch {
+	case age < time.Minute:
+		rel = "just now"
+	case age < time.Hour:
+		rel = fmt.Sprintf("%dm ago", int(age.Minutes()))
+	case age < 24*time.Hour:
+		rel = fmt.Sprintf("%dh ago", int(age.Hours()))
+	default:
+		rel = fmt.Sprintf("%dd ago", int(age.Hours()/24))
+	}
+	return fmt.Sprintf("%s (%s)", t.Format("Jan 2 15:04"), rel)
+}
+
 // runStatus prints the background processing state of every project.
 func runStatus(configPath string, out io.Writer) int {
 	st, err := loadStatus(statusPath(configPath))
@@ -130,18 +161,30 @@ func runStatus(configPath string, out io.Writer) int {
 		fmt.Fprintln(out, "No processing recorded.")
 		return 0
 	}
+	t := table.New().
+		Border(lipgloss.Border{}).
+		BorderTop(false).BorderBottom(false).BorderLeft(false).BorderRight(false).
+		BorderHeader(false).BorderColumn(false).BorderRow(false).
+		StyleFunc(func(row, _ int) lipgloss.Style {
+			if row == table.HeaderRow {
+				return tuiFaint.PaddingRight(2)
+			}
+			return lipgloss.NewStyle().PaddingRight(2)
+		}).
+		Headers("PROJECT", "STATUS", "DETAIL", "FINISHED")
 	for _, name := range slices.Sorted(maps.Keys(st)) {
 		e := st[name]
 		switch {
 		case e.State == "running" && pidAlive(e.PID):
-			fmt.Fprintf(out, "%s: running (pid %d, started %s)\n", name, e.PID, e.StartedAt)
+			t.Row(name, statusBusy.Render("◌ running"), fmt.Sprintf("pid %d", e.PID), "started "+fmtWhen(e.StartedAt))
 		case e.State == "running":
-			fmt.Fprintf(out, "%s: error — process died (started %s)\n", name, e.StartedAt)
+			t.Row(name, statusErr.Render("✗ error"), "process died", "started "+fmtWhen(e.StartedAt))
 		case e.State == "error":
-			fmt.Fprintf(out, "%s: error — %s (finished %s)\n", name, e.Detail, e.FinishedAt)
+			t.Row(name, statusErr.Render("✗ error"), collapse(e.Detail, 80), fmtWhen(e.FinishedAt))
 		default:
-			fmt.Fprintf(out, "%s: %s — %s (finished %s)\n", name, e.State, e.Detail, e.FinishedAt)
+			t.Row(name, statusOK.Render("● "+e.State), collapse(e.Detail, 80), fmtWhen(e.FinishedAt))
 		}
 	}
+	fmt.Fprintln(out, t)
 	return 0
 }
