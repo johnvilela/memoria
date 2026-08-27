@@ -56,11 +56,12 @@ type mcpDeleteOut struct {
 	Deleted bool   `json:"deleted"`
 }
 
-// mcpProject resolves cwd to a tracked project — or the _global
-// pseudo-project when global mode is on; every tool call starts here.
+// resolveWorkspace resolves cwd to a tracked project — or the _global
+// pseudo-project when global mode is on; every MCP tool call and the CLI
+// search start here.
 // For global runs the returned cfg carries the pinned commit policy
 // (globalCommitCfg), so callers must not re-apply it.
-func mcpProject(cwd, configPath string) (cfg config, proj, projName, wikiRoot string, err error) {
+func resolveWorkspace(cwd, configPath string) (cfg config, proj, projName, wikiRoot string, err error) {
 	cfg, err = loadConfig(configPath)
 	if err != nil {
 		return cfg, "", "", "", err
@@ -83,7 +84,7 @@ func mcpSearch(cwd, configPath, query string, includeTrash bool) (mcpSearchOut, 
 	if strings.TrimSpace(query) == "" {
 		return mcpSearchOut{}, fmt.Errorf("empty query")
 	}
-	_, _, _, wikiRoot, err := mcpProject(cwd, configPath)
+	_, _, _, wikiRoot, err := resolveWorkspace(cwd, configPath)
 	if err != nil {
 		return mcpSearchOut{}, err
 	}
@@ -149,7 +150,7 @@ func resolveSession(proj, sid string) (string, string, error) {
 }
 
 func mcpRecall(cwd, configPath, sessionID string) (mcpRecallOut, error) {
-	_, proj, _, wikiRoot, err := mcpProject(cwd, configPath)
+	_, proj, _, wikiRoot, err := resolveWorkspace(cwd, configPath)
 	if err != nil {
 		return mcpRecallOut{}, err
 	}
@@ -161,7 +162,7 @@ func mcpRecall(cwd, configPath, sessionID string) (mcpRecallOut, error) {
 }
 
 func mcpDigest(cwd, configPath, sessionID string) (mcpJobOut, error) {
-	_, proj, projName, wikiRoot, err := mcpProject(cwd, configPath)
+	_, proj, projName, wikiRoot, err := resolveWorkspace(cwd, configPath)
 	if err != nil {
 		return mcpJobOut{}, err
 	}
@@ -185,7 +186,7 @@ func mcpDigest(cwd, configPath, sessionID string) (mcpJobOut, error) {
 }
 
 func mcpConsolidate(cwd, configPath string, apply bool) (mcpJobOut, error) {
-	cfg, proj, projName, wikiRoot, err := mcpProject(cwd, configPath)
+	cfg, proj, projName, wikiRoot, err := resolveWorkspace(cwd, configPath)
 	if err != nil {
 		return mcpJobOut{}, err
 	}
@@ -241,7 +242,7 @@ func proposalPages(proposalPath string) ([]string, error) {
 }
 
 func mcpLint(cwd, configPath string) (mcpJobOut, error) {
-	_, proj, projName, _, err := mcpProject(cwd, configPath)
+	_, proj, projName, _, err := resolveWorkspace(cwd, configPath)
 	if err != nil {
 		return mcpJobOut{}, err
 	}
@@ -261,7 +262,7 @@ func mcpLint(cwd, configPath string) (mcpJobOut, error) {
 }
 
 func mcpWritePage(cwd, configPath string, in mcpWritePageIn) (mcpWriteOut, error) {
-	_, _, projName, wikiRoot, err := mcpProject(cwd, configPath)
+	_, _, projName, wikiRoot, err := resolveWorkspace(cwd, configPath)
 	if err != nil {
 		return mcpWriteOut{}, err
 	}
@@ -281,7 +282,7 @@ func mcpWritePage(cwd, configPath string, in mcpWritePageIn) (mcpWriteOut, error
 }
 
 func mcpDeletePage(cwd, configPath, pagePath string) (mcpDeleteOut, error) {
-	_, _, projName, wikiRoot, err := mcpProject(cwd, configPath)
+	_, _, projName, wikiRoot, err := resolveWorkspace(cwd, configPath)
 	if err != nil {
 		return mcpDeleteOut{}, err
 	}
