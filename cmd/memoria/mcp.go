@@ -56,22 +56,27 @@ type mcpDeleteOut struct {
 	Deleted bool   `json:"deleted"`
 }
 
-// mcpProject resolves cwd to a tracked project; every tool call starts here.
+// mcpProject resolves cwd to a tracked project — or the _global
+// pseudo-project when global mode is on; every tool call starts here.
+// For global runs the returned cfg carries the pinned commit policy
+// (globalCommitCfg), so callers must not re-apply it.
 func mcpProject(cwd, configPath string) (cfg config, proj, projName, wikiRoot string, err error) {
 	cfg, err = loadConfig(configPath)
 	if err != nil {
 		return cfg, "", "", "", err
 	}
-	proj = matchProject(cwd, cfg.Projects)
-	if proj == "" {
+	p, ok := resolveProject(cfg, configPath, cwd)
+	if !ok {
 		return cfg, "", "", "", fmt.Errorf("not inside a tracked project (run memoria bootstrap first)")
 	}
-	p := projectAt(cfg, proj)
+	if p.Name == globalName {
+		cfg = globalCommitCfg(cfg)
+	}
 	wikiName := p.Wiki
 	if wikiName == "" {
 		wikiName = "wiki"
 	}
-	return cfg, proj, p.Name, filepath.Join(proj, wikiName), nil
+	return cfg, p.Path, p.Name, filepath.Join(p.Path, wikiName), nil
 }
 
 func mcpSearch(cwd, configPath, query string, includeTrash bool) (mcpSearchOut, error) {
@@ -166,7 +171,8 @@ func mcpDigest(cwd, configPath, sessionID string) (mcpJobOut, error) {
 	}
 	rel := "sessions/" + sid + ".md"
 	ready := func(s procStatus) (mcpJobOut, bool) {
-		if s.State != "done" || s.Detail != "session page written: "+rel {
+		// prefix, not equality: a repaired run appends "— output repaired"
+		if s.State != "done" || !strings.HasPrefix(s.Detail, "session page written: "+rel) {
 			return mcpJobOut{}, false
 		}
 		b, err := os.ReadFile(filepath.Join(wikiRoot, "sessions", sid+".md"))
@@ -255,12 +261,12 @@ func mcpLint(cwd, configPath string) (mcpJobOut, error) {
 }
 
 func mcpWritePage(cwd, configPath string, in mcpWritePageIn) (mcpWriteOut, error) {
-	_, _, _, wikiRoot, err := mcpProject(cwd, configPath)
+	_, _, projName, wikiRoot, err := mcpProject(cwd, configPath)
 	if err != nil {
 		return mcpWriteOut{}, err
 	}
 	page := wikiPage{Path: in.Path, Title: in.Title, BodyMarkdown: in.BodyMarkdown, Tags: in.Tags}
-	if valid, dropped := validatePages([]wikiPage{page}, wikiRoot, false); len(valid) == 0 {
+	if valid, dropped := validatePages([]wikiPage{page}, wikiRoot, projName == globalName); len(valid) == 0 {
 		return mcpWriteOut{}, errors.New(dropped[0])
 	}
 	dst := filepath.Join(wikiRoot, filepath.FromSlash(in.Path))
@@ -275,11 +281,11 @@ func mcpWritePage(cwd, configPath string, in mcpWritePageIn) (mcpWriteOut, error
 }
 
 func mcpDeletePage(cwd, configPath, pagePath string) (mcpDeleteOut, error) {
-	_, _, _, wikiRoot, err := mcpProject(cwd, configPath)
+	_, _, projName, wikiRoot, err := mcpProject(cwd, configPath)
 	if err != nil {
 		return mcpDeleteOut{}, err
 	}
-	if !validPagePath(pagePath, wikiDirs(wikiRoot), false) {
+	if !validPagePath(pagePath, wikiDirs(wikiRoot), projName == globalName) {
 		return mcpDeleteOut{}, fmt.Errorf("page path %q outside the wiki structure", pagePath)
 	}
 	dst, err := trashPage(wikiRoot, pagePath)

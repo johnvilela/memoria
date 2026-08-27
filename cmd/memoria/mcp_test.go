@@ -428,3 +428,204 @@ func TestMCPConsolidateAutoApplied(t *testing.T) {
 		t.Fatalf("res = %+v, spawned = %v", res, *spawned)
 	}
 }
+
+// global capture on: wiki + recorded session g1 + pending digest under the
+// global root (the config dir); calls come from an unregistered cwd
+func mcpGlobalFixture(t *testing.T) (root, cwd, cfgPath string) {
+	t.Helper()
+	cfgPath = testGlobalConfig(t, "")
+	root = filepath.Dir(cfgPath)
+	pages := map[string]string{
+		"index.md":                    "# Global index\n\nstart here\n",
+		"srcfolder/concepts/queue.md": "---\ntags: [queue]\n---\n\n# Queue\n\nworkers pull jobs\n",
+	}
+	for p, c := range pages {
+		dst := filepath.Join(root, "wiki", filepath.FromSlash(p))
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(dst, []byte(c), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.MkdirAll(filepath.Join(root, ".memoria"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	idx := "2026-07-28T10:00:00Z - g1 - fix the thing\n"
+	if err := os.WriteFile(filepath.Join(root, ".memoria", "sessions.md"), []byte(idx), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	d := digestFile(root, "g1")
+	if err := os.MkdirAll(filepath.Dir(d), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	obs := "---\nkind: session-digest\nsession_id: g1\nproject: srcfolder\nproject_root: /src/srcfolder\n---\n\n@user-prompt 'fix the thing'\n"
+	if err := os.WriteFile(d, []byte(obs), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return root, t.TempDir(), cfgPath
+}
+
+func TestMCPGlobalDigest(t *testing.T) {
+	root, cwd, cfgPath := mcpGlobalFixture(t)
+	spawned := stubSpawn(t, 4242)
+	res, err := mcpDigest(cwd, cfgPath, "g1") // explicit session id
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.State != "started" {
+		t.Fatalf("state = %q", res.State)
+	}
+	want := []string{cwd, "digest", "g1", "--foreground"}
+	if strings.Join(*spawned, " ") != strings.Join(want, " ") {
+		t.Fatalf("spawned %v, want %v", *spawned, want)
+	}
+	st, _ := loadStatus(statusPath(cfgPath))
+	if st[globalName].State != "running" {
+		t.Fatalf("status = %+v, want running under %s", st, globalName)
+	}
+	// default sid resolves from the global sessions.md; alive job → running
+	if err := statusSet(statusPath(cfgPath), globalName, "running", os.Getpid(), ""); err != nil {
+		t.Fatal(err)
+	}
+	*spawned = nil
+	if res, _ = mcpDigest(cwd, cfgPath, ""); res.State != "running" || len(*spawned) != 0 {
+		t.Fatalf("state = %q, spawned = %v", res.State, *spawned)
+	}
+	// job done → page content returned, default and explicit sid alike
+	page := filepath.Join(root, "wiki", "sessions", "g1.md")
+	if err := os.MkdirAll(filepath.Dir(page), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(page, []byte("# G1\n\ncompiled\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := statusSet(statusPath(cfgPath), globalName, "done", 0, "session page written: sessions/g1.md"); err != nil {
+		t.Fatal(err)
+	}
+	for _, sid := range []string{"", "g1"} {
+		res, err = mcpDigest(cwd, cfgPath, sid)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.State != "done" || res.Page != "sessions/g1.md" || !strings.Contains(res.Content, "compiled") {
+			t.Fatalf("sid %q: res = %+v", sid, res)
+		}
+	}
+	// a repaired run's detail suffix must still read as done, not respawn
+	if err := statusSet(statusPath(cfgPath), globalName, "done", 0, "session page written: sessions/g1.md — output repaired"); err != nil {
+		t.Fatal(err)
+	}
+	*spawned = nil
+	if res, _ = mcpDigest(cwd, cfgPath, "g1"); res.State != "done" || len(*spawned) != 0 {
+		t.Fatalf("repaired detail: res = %+v, spawned = %v", res, *spawned)
+	}
+	if _, err := mcpDigest(cwd, cfgPath, "nope"); err == nil {
+		t.Fatal("unknown sid must error")
+	}
+}
+
+func TestMCPGlobalDigestGlobalOffErrors(t *testing.T) {
+	cfgPath := testConfig(t)
+	if _, err := mcpDigest(t.TempDir(), cfgPath, "g1"); err == nil ||
+		!strings.Contains(err.Error(), "not inside a tracked project") {
+		t.Fatalf("err = %v, want tracked-project error with global off", err)
+	}
+}
+
+func TestMCPGlobalRecall(t *testing.T) {
+	root, cwd, cfgPath := mcpGlobalFixture(t)
+	for _, sid := range []string{"", "g1"} {
+		res, err := mcpRecall(cwd, cfgPath, sid)
+		if err != nil {
+			t.Fatalf("sid %q: %v", sid, err)
+		}
+		if res.SessionID != "g1" || !strings.Contains(res.Content, "@user-prompt 'fix the thing'") {
+			t.Fatalf("sid %q: res = %+v", sid, res)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(root, "wiki", "sessions")); !os.IsNotExist(err) {
+		t.Fatalf("recall must write nothing under wiki/sessions: %v", err)
+	}
+	if _, err := mcpRecall(cwd, cfgPath, "nope"); err == nil {
+		t.Fatal("unknown sid must error")
+	}
+}
+
+func TestMCPGlobalSearch(t *testing.T) {
+	_, cwd, cfgPath := mcpGlobalFixture(t)
+	res, err := mcpSearch(cwd, cfgPath, "workers pull", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Matches) != 1 || res.Matches[0].Path != "srcfolder/concepts/queue.md" ||
+		!strings.Contains(res.Matches[0].Content, "workers pull jobs") {
+		t.Fatalf("matches = %+v", res.Matches)
+	}
+	if res, _ = mcpSearch(cwd, cfgPath, "#queue", false); len(res.Matches) != 1 {
+		t.Fatalf("tag search = %+v", res.Matches)
+	}
+}
+
+func TestMCPGlobalWriteDeletePage(t *testing.T) {
+	root, cwd, cfgPath := mcpGlobalFixture(t)
+	// a brand-new per-source-folder namespace is legal in the global wiki
+	res, err := mcpWritePage(cwd, cfgPath, mcpWritePageIn{
+		Path: "newfolder/concepts/x.md", Title: "X", BodyMarkdown: "# X\n\nnotes\n",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Written {
+		t.Fatalf("res = %+v", res)
+	}
+	if _, err := os.Stat(filepath.Join(root, "wiki", "newfolder", "concepts", "x.md")); err != nil {
+		t.Fatalf("page not written under the global wiki: %v", err)
+	}
+	// reserved folders stay reserved in global mode
+	for _, bad := range []string{"trash/x.md", "_global/x.md", ".obsidian/x.md", "../evil.md"} {
+		if _, err := mcpWritePage(cwd, cfgPath, mcpWritePageIn{Path: bad, Title: "x", BodyMarkdown: "y"}); err == nil {
+			t.Fatalf("bad path accepted: %q", bad)
+		}
+	}
+	del, err := mcpDeletePage(cwd, cfgPath, "srcfolder/concepts/queue.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if del.Path != "trash/srcfolder/concepts/queue.md" || !del.Deleted {
+		t.Fatalf("res = %+v", del)
+	}
+	if _, err := mcpDeletePage(cwd, cfgPath, "../evil.md"); err == nil {
+		t.Fatal("traversal must error")
+	}
+}
+
+func TestMCPGlobalRegisteredProjectWins(t *testing.T) {
+	proj := t.TempDir()
+	cfgPath := testGlobalConfig(t, "", proj)
+	root := filepath.Dir(cfgPath)
+	if err := os.MkdirAll(filepath.Join(root, "wiki"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// inside the registered project: writes land in the project wiki, and the
+	// global anything-goes namespace rule must not leak in
+	if _, err := mcpWritePage(proj, cfgPath, mcpWritePageIn{Path: "concepts/a.md", Title: "A", BodyMarkdown: "# A\n"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(proj, "wiki", "concepts", "a.md")); err != nil {
+		t.Fatalf("page not in the project wiki: %v", err)
+	}
+	if _, err := mcpWritePage(proj, cfgPath, mcpWritePageIn{Path: "newfolder/concepts/a.md", Title: "A", BodyMarkdown: "# A\n"}); err == nil {
+		t.Fatal("global namespace rule leaked into a registered project")
+	}
+	// from an unregistered cwd: writes land in the global wiki
+	if _, err := mcpWritePage(t.TempDir(), cfgPath, mcpWritePageIn{Path: "concepts/b.md", Title: "B", BodyMarkdown: "# B\n"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "wiki", "concepts", "b.md")); err != nil {
+		t.Fatalf("page not in the global wiki: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(proj, "wiki", "concepts", "b.md")); !os.IsNotExist(err) {
+		t.Fatal("global write leaked into the project wiki")
+	}
+}

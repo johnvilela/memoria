@@ -25,7 +25,7 @@ Config keys: `global: bool`, `global_path: string` (empty = default root). The f
 - **Default root**: `~/.config/memoria` (the config directory). Its `wiki/` subfolder gets its own `git init` and an init commit — but **the config directory itself is never turned into a git repo**, since `config.yaml` can hold a `gemini_api_key` and is kept 0600. Every applied write to the default-root wiki auto-commits regardless of the `wiki_auto_commit` setting.
 - **`--global-path <folder>`**: memoria never touches git there at all — no init, no auto-commit. It is the user's own folder to manage.
 
-This forced-commit / never-commit split is implemented by `globalCommitCfg`, which flips `WikiAutoCommit` on a copy of the config at three call sites (`runProcess`, `processAll`, `runLint`) rather than threading extra state through `commitWiki`.
+This forced-commit / never-commit split is implemented by `globalCommitCfg`, which flips `WikiAutoCommit` on a copy of the config at its call sites (`runProcess`, `processAll`, `runLint`, `mcpProject`, `runDigest`) rather than threading extra state through `commitWiki`.
 
 ## What gets captured, and where it lands
 
@@ -35,7 +35,7 @@ The global wiki mixes the usual shared root categories (`concepts/`, `decisions/
 
 ## Which commands are global-aware
 
-Touched: `captureHook` (the capture gate), `process` (including `--all`, so the cron sweeps `_global` for free), `lint`. Left project-scoped on purpose: `search`, `run`, `mcp`, `commit`, `digest` — these are resume/recall machinery or already error per-call in an untracked cwd, and did not need a global variant.
+Touched: `captureHook` (the capture gate), `process` (including `--all`, so the cron sweeps `_global` for free), `lint`, `mcp` (since v0.10.1 all seven tools resolve via `resolveProject`, so an MCP server launched in an unregistered folder falls back to the global workspace — sessions, wiki, page validation and commit policy included), and `digest` (spawned by MCP `memoria_digest` with the caller's cwd, so its child must resolve the same way). With an empty `session_id`, "most recent session" means the newest *global* session, which may come from a different source folder than the caller's cwd — same pooling as the queue. Left project-scoped on purpose: `search`, `run`, `commit`, `seed` — human-facing resume/recall machinery (agents use the MCP tools).
 
 ## Known ceilings
 
