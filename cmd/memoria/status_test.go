@@ -131,6 +131,7 @@ func TestRunStatusOutput(t *testing.T) {
 	}
 	got := buf.String()
 	for _, w := range []string{
+		"PROJECT", "STATUS", "DETAIL", "FINISHED",
 		"alive", "running",
 		"crashed", "process died",
 		"finished", "proposal ready: 3 pages",

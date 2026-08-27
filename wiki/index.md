@@ -21,6 +21,7 @@ Start with [[concepts/architecture-overview]] for the pipeline end to end.
 - [[concepts/queue-write-safety]] — file locking and atomic operations protect queue and status files from concurrent writes
 - [[concepts/ci-release-pipeline]] — GitHub Actions CI/release pipeline: version-check gate, auto-tag + auto-release on merge, gotestsum vitest-style test output — shipped v0.8.0/v0.8.1
 - [[concepts/self-update-command]] — `memoria update`: checks GitHub releases, checksum-verifies, self-replaces the running binary; release binaries trimmed ~15MB→~10MB via `-ldflags="-s -w"` — shipped on `feat/update-command`, no PR yet
+- [[concepts/status-table]] — `memoria status` renders as a borderless lipgloss table instead of prose lines — shipped on `feat/status-table`, PR #5 (open, not approved), version bumped to 0.10.0
 - [[research/ai-memory-workstream-comparison]] — external (chatgpt) deep-dive on ai-memory v1.19.2 that fed the `run` rework
 
 ## Decisions — why it's shaped this way
@@ -39,6 +40,10 @@ Start with [[concepts/architecture-overview]] for the pipeline end to end.
 ## Skills — how-to references
 
 - [[skills/release-ritual]] — how to cut a release: pick version, bump const, PR, merge (mechanics automated since `decisions/0012`)
+
+## Rules — standing instructions
+
+- [[rules/no-ai-attribution]] — never include AI-tool attribution footers or session links in commits/PRs/issues for this project; set after a PR #5 body correction
 
 ## Gotchas — what bit us
 
@@ -85,3 +90,4 @@ Start with [[concepts/architecture-overview]] for the pipeline end to end.
 - [[sessions/266a3d10-ad0c-44f1-86f7-379941908fbf]] — global capture mode shipped: `8e495d5` — `bootstrap --global`/`--global-path`, `setup --global`, `_global` pseudo-project
 - [[sessions/e7535e5e-c210-4029-8496-3ab3c84ea9dd]] — release pipeline shipped: v0.8.0 (CI/CD + branch protection) and v0.8.1 (vitest-style test output)
 - [[sessions/6f2b7832-1db8-4e7a-a2c0-ca0cc207e4c8]] — `memoria update` self-update command + release-binary install script shipped on `feat/update-command` (no PR yet); release binaries trimmed ~15MB→~10MB via `-ldflags="-s -w"`
+- [[sessions/de6b74fc-4caf-4133-ab00-ee307afe6d78]] — `memoria status` restyled as a lipgloss table (PR #5, unmerged, version bumped to 0.10.0); no-AI-attribution rule set after a PR body correction
