@@ -8,7 +8,7 @@ import (
 )
 
 // version is bumped by hand on release, together with the matching git tag.
-const version = "0.8.1"
+const version = "0.9.0"
 
 func run(args []string, stdin io.Reader, out io.Writer) int {
 	arg := ""
@@ -98,6 +98,8 @@ func run(args []string, stdin io.Reader, out io.Writer) int {
 		return runDigest(cwd, defaultConfigPath(), args[1:], out)
 	case "status":
 		return runStatus(defaultConfigPath(), out)
+	case "update":
+		return runUpdate(args[1:], out)
 	case "mcp":
 		return runMCP(defaultConfigPath(), out)
 	case "hook":

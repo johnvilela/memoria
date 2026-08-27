@@ -1,26 +1,37 @@
 #!/bin/sh
 # Install memoria to $BIN_DIR (default ~/.local/bin), then run `memoria init`.
 #   curl -sS https://raw.githubusercontent.com/johnvilela/memoria/main/scripts/install.sh | sh
-# Inside the repo: builds and installs the local checkout.
-# Requires Go. ponytail: swap the go-install path for a release-binary download once github releases exist.
+# Inside the repo: builds and installs the local checkout (requires Go).
+# Standalone: downloads the latest release binary, checksum-verified.
 set -eu
 
 BIN_DIR="${BIN_DIR:-$HOME/.local/bin}"
 
-os=$(uname -s)
-case "$os" in
-    Linux|Darwin) ;;
-    *) echo "error: unsupported OS: $os (linux and macos only)" >&2; exit 1 ;;
+case "$(uname -s)" in
+    Linux) os=linux ;;
+    Darwin) os=darwin ;;
+    *) echo "error: unsupported OS: $(uname -s) (linux and macos only)" >&2; exit 1 ;;
 esac
-
-command -v go >/dev/null 2>&1 || { echo "error: go is required (https://go.dev/dl)" >&2; exit 1; }
+case "$(uname -m)" in
+    x86_64|amd64) arch=amd64 ;;
+    aarch64|arm64) arch=arm64 ;;
+    *) echo "error: unsupported architecture: $(uname -m) (amd64 and arm64 only)" >&2; exit 1 ;;
+esac
 
 mkdir -p "$BIN_DIR"
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." 2>/dev/null && pwd)
 if [ -f "$repo_root/go.mod" ]; then
+    command -v go >/dev/null 2>&1 || { echo "error: go is required (https://go.dev/dl)" >&2; exit 1; }
     go build -C "$repo_root" -trimpath -o "$BIN_DIR/memoria" ./cmd/memoria
 else
-    GOBIN="$BIN_DIR" go install github.com/johnvilela/memoria/cmd/memoria@latest
+    command -v sha256sum >/dev/null 2>&1 || sha256sum() { shasum -a 256 "$@"; }
+    url="https://github.com/johnvilela/memoria/releases/latest/download"
+    tmp=$(mktemp -d)
+    trap 'rm -rf "$tmp"' EXIT
+    curl -fsSL -o "$tmp/memoria_${os}_${arch}" "$url/memoria_${os}_${arch}"
+    curl -fsSL -o "$tmp/checksums.txt" "$url/checksums.txt"
+    (cd "$tmp" && grep " memoria_${os}_${arch}\$" checksums.txt | sha256sum -c - >/dev/null)
+    install -m 755 "$tmp/memoria_${os}_${arch}" "$BIN_DIR/memoria"
 fi
 echo "installed $BIN_DIR/memoria"
 

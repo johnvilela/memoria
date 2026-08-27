@@ -33,6 +33,7 @@ var commands = []command{
 	{name: "mcp", desc: "Serve the memoria tools to code agents over stdio", internal: true},
 	{name: "status", desc: "Show background processing state per project"},
 	{name: "bootstrap", desc: "Register current folder as a tracked project and seed the wiki from git history (--wiki <name>, --background); --global [--global-path <folder>] captures unregistered folders too"},
+	{name: "update", desc: "Check GitHub for a newer release and replace this binary (-y installs without asking)"},
 	{name: "digest", desc: "Compile one session's digest into its wiki session page", internal: true},
 	{name: "hook", desc: "Receive hook data from a code agent", internal: true},
 }
