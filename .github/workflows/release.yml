@@ -1,0 +1,39 @@
+name: release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: scripts/test.sh
+
+  release:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: build and release if the version tag is new
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(sed -n 's/^const version = "\(.*\)"$/\1/p' cmd/memoria/main.go)
+          if git ls-remote --exit-code --tags origin "refs/tags/v$version" >/dev/null; then
+            echo "tag v$version already exists — nothing to release"
+            exit 0
+          fi
+          scripts/build.sh all
+          (cd dist && sha256sum memoria_* > checksums.txt)
+          gh release create "v$version" dist/* --generate-notes --target "$GITHUB_SHA"

@@ -4,6 +4,8 @@ tags: [release, versioning, workflow]
 
 # Release ritual
 
+> **Partially superseded**: steps 4–6 and the `gh release create` are now automated. You still pick the number and bump the const by hand — but inside the feature PR (CI's `version-check` blocks merging Go changes without a bump). On merge to main, `.github/workflows/release.yml` runs the tests, cross-compiles, tags `v<version>`, and publishes the GitHub release. Never tag or release by hand.
+
 Semver, pre-1.0: minor bump per feature batch, patch bump per fix-only release. Version lives in **one place**: `const version` in `cmd/memoria/main.go` — the MCP handshake (`cmd/memoria/mcp.go`) and the `version` subcommand both read it.
 
 Steps, in order, one commit:
