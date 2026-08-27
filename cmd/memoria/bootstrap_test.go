@@ -312,3 +312,171 @@ func TestBootstrapBlockUsesCustomWikiName(t *testing.T) {
 		t.Fatalf("custom wiki name missing: %q", b)
 	}
 }
+
+func TestBootstrapGlobalEnables(t *testing.T) {
+	cfgDir := t.TempDir()
+	cfgPath := filepath.Join(cfgDir, "config.yaml")
+	var out strings.Builder
+	if code := runBootstrapGlobal(cfgPath, "", &out); code != 0 {
+		t.Fatalf("exit = %d (out: %s)", code, out.String())
+	}
+	if strings.Contains(out.String(), "already enabled") {
+		t.Fatalf("fresh enable claimed already enabled: %s", out.String())
+	}
+	cfg, err := loadConfig(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Global || cfg.GlobalPath != "" {
+		t.Fatalf("cfg = %+v, want global on with empty path", cfg)
+	}
+	if len(cfg.Projects) != 0 {
+		t.Fatalf("projects touched: %+v", cfg.Projects)
+	}
+	if _, err := os.Stat(filepath.Join(cfgDir, "wiki", ".gitkeep")); err != nil {
+		t.Fatal("wiki/.gitkeep missing")
+	}
+	if _, err := os.Stat(filepath.Join(cfgDir, "wiki", ".git")); err != nil {
+		t.Fatal("default global wiki must be its own git repo")
+	}
+	// config.yaml can hold an API key — the config dir must never become a repo
+	if _, err := os.Stat(filepath.Join(cfgDir, ".git")); !os.IsNotExist(err) {
+		t.Fatal("config dir was turned into a git repo")
+	}
+	if fi, _ := os.Stat(cfgPath); fi.Mode().Perm() != 0o600 {
+		t.Fatalf("config mode = %v, want 0600", fi.Mode().Perm())
+	}
+}
+
+func TestBootstrapGlobalPath(t *testing.T) {
+	base := t.TempDir()
+	t.Chdir(base)
+	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+	var out strings.Builder
+	if code := runBootstrapGlobal(cfgPath, "gdir", &out); code != 0 {
+		t.Fatalf("exit = %d (out: %s)", code, out.String())
+	}
+	cfg, err := loadConfig(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !filepath.IsAbs(cfg.GlobalPath) || filepath.Base(cfg.GlobalPath) != "gdir" {
+		t.Fatalf("global_path = %q, want the relative --global-path stored absolute", cfg.GlobalPath)
+	}
+	root := cfg.GlobalPath
+	if _, err := os.Stat(filepath.Join(root, "wiki", ".gitkeep")); err != nil {
+		t.Fatal("wiki/.gitkeep missing under --global-path root")
+	}
+	// --global-path = the user's folder: memoria never touches git there
+	for _, p := range []string{filepath.Join(root, ".git"), filepath.Join(root, "wiki", ".git")} {
+		if _, err := os.Stat(p); !os.IsNotExist(err) {
+			t.Fatalf("%s created — git must not be touched for --global-path roots", p)
+		}
+	}
+}
+
+func TestBootstrapGlobalFlagErrors(t *testing.T) {
+	for _, args := range [][]string{
+		{"bootstrap", "--global-path", "x"},
+		{"bootstrap", "--global", "--wiki", "x"},
+		{"bootstrap", "--global", "--background"},
+	} {
+		var out strings.Builder
+		if code := run(args, strings.NewReader(""), &out); code != 1 {
+			t.Fatalf("%v: exit = %d, want 1 (out: %s)", args, code, out.String())
+		}
+	}
+}
+
+func TestBootstrapGlobalIdempotent(t *testing.T) {
+	cfgDir := t.TempDir()
+	cfgPath := filepath.Join(cfgDir, "config.yaml")
+	var out strings.Builder
+	if code := runBootstrapGlobal(cfgPath, "", &out); code != 0 {
+		t.Fatalf("first run exit = %d (out: %s)", code, out.String())
+	}
+	before, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := filepath.Join(cfgDir, "wiki", "concepts", "a.md")
+	if err := os.MkdirAll(filepath.Dir(page), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(page, []byte("body"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out.Reset()
+	if code := runBootstrapGlobal(cfgPath, "", &out); code != 0 {
+		t.Fatalf("second run exit = %d (out: %s)", code, out.String())
+	}
+	if !strings.Contains(out.String(), "already enabled") {
+		t.Fatalf("output %q missing already enabled", out.String())
+	}
+	after, _ := os.ReadFile(cfgPath)
+	if string(before) != string(after) {
+		t.Fatal("config changed on second run")
+	}
+	if b, _ := os.ReadFile(page); string(b) != "body" {
+		t.Fatal("existing wiki page touched on re-run")
+	}
+}
+
+func TestBootstrapGlobalPathChangeWarnsPending(t *testing.T) {
+	cfgDir := t.TempDir()
+	cfgPath := filepath.Join(cfgDir, "config.yaml")
+	var out strings.Builder
+	if code := runBootstrapGlobal(cfgPath, "", &out); code != 0 {
+		t.Fatalf("enable exit = %d", code)
+	}
+	if err := queueAdd(queuePath(cfgPath), globalName, "/old/root/.memoria/sessions/pending/s1.md"); err != nil {
+		t.Fatal(err)
+	}
+
+	out.Reset()
+	newRoot := filepath.Join(t.TempDir(), "g")
+	if code := runBootstrapGlobal(cfgPath, newRoot, &out); code != 0 {
+		t.Fatalf("path change exit = %d (out: %s)", code, out.String())
+	}
+	cfg, _ := loadConfig(cfgPath)
+	if cfg.GlobalPath != newRoot {
+		t.Fatalf("global_path = %q, want %q", cfg.GlobalPath, newRoot)
+	}
+	if !strings.Contains(out.String(), "changed") || !strings.Contains(out.String(), "pending") {
+		t.Fatalf("output %q missing root-change note and pending warning", out.String())
+	}
+
+	// entries already under the destination root are not stranded — moving
+	// again must not warn about them
+	if err := queueRemove(queuePath(cfgPath), globalName, "/old/root/.memoria/sessions/pending/s1.md"); err != nil {
+		t.Fatal(err)
+	}
+	next := filepath.Join(t.TempDir(), "g2")
+	if err := queueAdd(queuePath(cfgPath), globalName, filepath.Join(next, ".memoria", "sessions", "pending", "s2.md")); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	if code := runBootstrapGlobal(cfgPath, next, &out); code != 0 {
+		t.Fatalf("second path change exit = %d (out: %s)", code, out.String())
+	}
+	if strings.Contains(out.String(), "pending") {
+		t.Fatalf("warned about entries already under the new root: %s", out.String())
+	}
+}
+
+func TestBootstrapGlobalMalformedConfig(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+	garbage := []byte("projects: [broken\n")
+	if err := os.WriteFile(cfgPath, garbage, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out strings.Builder
+	if code := runBootstrapGlobal(cfgPath, "", &out); code != 1 {
+		t.Fatalf("exit = %d, want 1", code)
+	}
+	b, _ := os.ReadFile(cfgPath)
+	if string(b) != string(garbage) {
+		t.Fatal("malformed config was rewritten")
+	}
+}

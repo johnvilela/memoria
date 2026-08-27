@@ -13,7 +13,7 @@ import (
 // and adds capture hooks for more agents without touching existing ones.
 func runSetup(args []string, configPath string, out io.Writer) int {
 	usage := func() {
-		fmt.Fprintln(out, "usage: memoria setup [--client claude-code,codex] [--processor claude-code|codex|ollama|gemini] [--notification] [--auto-apply] [--auto-commit] [--cron <expr|preset|off>] [--cron-apply]")
+		fmt.Fprintln(out, "usage: memoria setup [--client claude-code,codex] [--processor claude-code|codex|ollama|gemini] [--notification] [--auto-apply] [--auto-commit] [--cron <expr|preset|off>] [--cron-apply] [--global] [--global-path <folder>]")
 	}
 	args = normalizeCronArgs(args)
 	fs := flag.NewFlagSet("setup", flag.ContinueOnError)
@@ -25,10 +25,12 @@ func runSetup(args []string, configPath string, out io.Writer) int {
 	autoCommit := fs.Bool("auto-commit", false, "commit the wiki after every applied change")
 	cron := fs.String("cron", "", "schedule for background processing (cron expression, preset, or off)")
 	cronApply := fs.Bool("cron-apply", false, "scheduled runs apply proposals without review")
+	global := fs.Bool("global", false, "capture sessions in unregistered folders (--global=false disables)")
+	gpath := fs.String("global-path", "", "move the global capture root (empty = back to the config folder)")
 	if err := fs.Parse(args); err != nil {
 		return 1
 	}
-	var notifSet, autoSet, commitSet, cronSet, cronApplySet bool
+	var notifSet, autoSet, commitSet, cronSet, cronApplySet, globalSet, pathSet bool
 	fs.Visit(func(f *flag.Flag) {
 		switch f.Name {
 		case "notification":
@@ -41,6 +43,10 @@ func runSetup(args []string, configPath string, out io.Writer) int {
 			cronSet = true
 		case "cron-apply":
 			cronApplySet = true
+		case "global":
+			globalSet = true
+		case "global-path":
+			pathSet = true
 		}
 	})
 	if fs.NArg() > 0 {
@@ -72,7 +78,7 @@ func runSetup(args []string, configPath string, out io.Writer) int {
 	}
 
 	// any flag given = change exactly that, keep the rest — no prompts
-	anySet := *clientFlag != "" || *processor != "" || notifSet || autoSet || commitSet || cronSet || cronApplySet
+	anySet := *clientFlag != "" || *processor != "" || notifSet || autoSet || commitSet || cronSet || cronApplySet || globalSet || pathSet
 	if !anySet {
 		if !isTTY() {
 			usage()
@@ -178,6 +184,11 @@ func runSetup(args []string, configPath string, out io.Writer) int {
 	}
 	if *processor != "" || notifSet || autoSet || commitSet {
 		if code := saveInitConfig(*processor, *notification, notifSet, *autoApply, autoSet, *autoCommit, commitSet, configPath, out); code != 0 {
+			return code
+		}
+	}
+	if globalSet || pathSet {
+		if code := applyGlobalSetting(*global, globalSet, *gpath, pathSet, configPath, out); code != 0 {
 			return code
 		}
 	}

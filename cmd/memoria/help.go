@@ -24,7 +24,7 @@ var commands = []command{
 	{name: "help", desc: "Show this help screen"},
 	{name: "version", desc: "Print the memoria version"},
 	{name: "init", desc: "Install hooks into one or more code agents and choose the session processor (--client a,b, --processor, --notification, --auto-apply, --auto-commit, --cron)"},
-	{name: "setup", desc: "Reconfigure processor, notifications, auto-apply, auto-commit, schedule, or add hooks to more agents (--client a,b, --processor, --notification, --auto-apply, --auto-commit, --cron [expr|off], --cron-apply)"},
+	{name: "setup", desc: "Reconfigure processor, notifications, auto-apply, auto-commit, schedule, global capture, or add hooks to more agents (--client a,b, --processor, --notification, --auto-apply, --auto-commit, --cron [expr|off], --cron-apply, --global[=false], --global-path <folder>)"},
 	{name: "process", desc: "Consolidate pending sessions into the project wiki in the background (review, then --apply; --inspect follows a running job; --all sweeps every project)"},
 	{name: "lint", desc: "Audit the wiki for contradictions in the background (--review, --apply a fix, --deny \"why\")"},
 	{name: "run", desc: "Launch a code agent here, continuing a previous session (--new, --session <id|name>; no flags → pick from the last 5)"},
@@ -32,7 +32,7 @@ var commands = []command{
 	{name: "commit", desc: "Commit the wiki folder's changes — new and modified pages (-m overrides the subject)"},
 	{name: "mcp", desc: "Serve the memoria tools to code agents over stdio", internal: true},
 	{name: "status", desc: "Show background processing state per project"},
-	{name: "bootstrap", desc: "Register current folder as a tracked project and seed the wiki from git history (--wiki <name>, --background)"},
+	{name: "bootstrap", desc: "Register current folder as a tracked project and seed the wiki from git history (--wiki <name>, --background); --global [--global-path <folder>] captures unregistered folders too"},
 	{name: "digest", desc: "Compile one session's digest into its wiki session page", internal: true},
 	{name: "hook", desc: "Receive hook data from a code agent", internal: true},
 }

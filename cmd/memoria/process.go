@@ -22,14 +22,43 @@ import (
 var defaultWikiPrompt string
 
 // appended by Go, never stored in the editable prompt file, so user edits
-// can't break parsing
-const jsonContract = `Output ONLY a ConsolidatedBatch JSON object, no code fences, no commentary:
+// can't break parsing. The folder rule is the only piece that differs between
+// a project wiki and the global catch-all wiki.
+const (
+	jsonContractHead = `Output ONLY a ConsolidatedBatch JSON object, no code fences, no commentary:
 {"pages":[{"path":"...","title":"...","tags":["tag-1"],"body_markdown":"markdown body"}]}
-"path" is relative to the wiki root, always ending in .md. Valid targets: "index.md", the suggested categories concepts/, decisions/, gotchas/, rules/, sessions/, and any other top-level folder already present in the CURRENT WIKI section. Do NOT invent new top-level folders; trash/, _global/ and dot-folders are reserved.
+`
+	folderRuleProject = `"path" is relative to the wiki root, always ending in .md. Valid targets: "index.md", the suggested categories concepts/, decisions/, gotchas/, rules/, sessions/, and any other top-level folder already present in the CURRENT WIKI section. Do NOT invent new top-level folders; trash/, _global/ and dot-folders are reserved.`
+	folderRuleGlobal  = `"path" is relative to the wiki root, always ending in .md. Valid targets: "index.md", the shared categories concepts/, decisions/, gotchas/, rules/, sessions/, and per-source-folder namespaces "<folder>/..." named exactly after a digest's "project" frontmatter value (e.g. "myapp/concepts/x.md"). trash/, _global/ and dot-folders are reserved.`
+	jsonContractTail  = `
 The episodic session page goes at "sessions/<session_id>.md" (session_id from the digest frontmatter).
 "body_markdown" is the page body without frontmatter — memoria writes the tags frontmatter itself.
 "tags" are 0-5 short kebab-case tags. 1-5 pages.
 Escape every " inside a string value as \" and every newline as \n — one raw quote in a body breaks the whole batch.`
+	jsonContract       = jsonContractHead + folderRuleProject + jsonContractTail
+	jsonContractGlobal = jsonContractHead + folderRuleGlobal + jsonContractTail
+)
+
+// appended to the wiki prompt for global runs — the catch-all wiki pools
+// sessions from many unrelated folders and splits shared vs scoped knowledge.
+const globalPromptAddendum = `
+
+## GLOBAL WIKI — folder namespaces
+
+These sessions were captured in unregistered folders; this wiki is the
+global catch-all for all of them. Each digest's frontmatter names its
+source: "project" is the source folder's name and "project_root" its
+absolute path.
+
+- Knowledge specific to one source folder goes under that folder's
+  namespace: "<project>/concepts/...", "<project>/decisions/...", and
+  so on, using the digest's "project" value as the folder name.
+- Cross-cutting knowledge (conventions, principles, or traps that apply
+  beyond one folder) goes in the shared root categories: concepts/,
+  decisions/, gotchas/, rules/.
+- Episodic session pages always go at "sessions/<session_id>.md".
+- Never mix knowledge from unrelated source folders into one namespaced
+  page.`
 
 type wikiPage struct {
 	Path         string   `json:"path"`
@@ -106,12 +135,15 @@ func runProcess(cwd, configPath string, args []string, out io.Writer) int {
 	if *all {
 		return processAll(cfg, configPath, *apply, out)
 	}
-	proj := matchProject(cwd, cfg.Projects)
-	if proj == "" {
+	p, ok := resolveProject(cfg, configPath, cwd)
+	if !ok {
 		fmt.Fprintln(out, "error: not inside a tracked project (run memoria bootstrap first)")
 		return 1
 	}
-	p := projectAt(cfg, proj)
+	if p.Name == globalName {
+		cfg = globalCommitCfg(cfg)
+	}
+	proj := p.Path
 	wikiName := p.Wiki
 	if wikiName == "" {
 		wikiName = "wiki"
@@ -174,7 +206,15 @@ func detachProcess(cfg config, cwd, configPath, projName string, out io.Writer) 
 // wiki immediately after generation (no human review).
 func processAll(cfg config, configPath string, apply bool, out io.Writer) int {
 	worked, failed := 0, 0
-	for _, p := range cfg.Projects {
+	projects := cfg.Projects
+	if cfg.Global {
+		projects = append(slices.Clone(projects), globalProject(cfg, configPath))
+	}
+	for _, p := range projects {
+		cfg := cfg // per-project copy: the global entry pins its commit policy
+		if p.Name == globalName {
+			cfg = globalCommitCfg(cfg)
+		}
 		root := filepath.Clean(p.Path)
 		sessions, _, err := collectEnded(queuePath(configPath), p.Name)
 		if err != nil {
@@ -386,7 +426,7 @@ func generateProposal(cfg config, proj, wikiRoot, proposalPath, configPath, proj
 	if err != nil {
 		return fail(err)
 	}
-	prompt := buildPrompt(rules, readWiki(wikiRoot), digests)
+	prompt := buildPrompt(rules, readWiki(wikiRoot), digests, projName == globalName)
 	fmt.Fprintf(out, "Invoking %s with %d session(s) — this can take a few minutes...\n", cfg.Processor, len(sessions))
 	raw, err := invokeProcessor(cfg, proj, prompt)
 	if err != nil {
@@ -402,7 +442,7 @@ func generateProposal(cfg config, proj, wikiRoot, proposalPath, configPath, proj
 	// pin session pages before the shared validator: it accepts any name under
 	// sessions/, and lint's fix pass legitimately edits pages outside a batch
 	proposed, droppedPages := canonicalizeSessionPaths(pp.Pages, batchSessionIDs(sessions))
-	pages, dropped := validatePages(proposed, wikiRoot)
+	pages, dropped := validatePages(proposed, wikiRoot, projName == globalName)
 	droppedPages = append(droppedPages, dropped...)
 	for _, d := range droppedPages {
 		fmt.Fprintln(out, "warning:", d)
@@ -472,7 +512,7 @@ func applyProposal(cfg config, proj, wikiRoot, proposalPath, qPath, projName str
 		fmt.Fprintf(out, "error: proposal is for %q, current project is %q\n", prop.Project, projName)
 		return 1
 	}
-	pages, dropped := validatePages(prop.Pages, wikiRoot)
+	pages, dropped := validatePages(prop.Pages, wikiRoot, projName == globalName)
 	for _, d := range dropped {
 		fmt.Fprintln(out, "warning:", d)
 	}
@@ -551,13 +591,13 @@ func digestConsumed(path string, sizes map[string]int64) bool {
 // validPagePath), no traversal, nothing empty. Invalid pages are dropped
 // with a reason instead of failing the batch — callers warn and fail only
 // when nothing survives.
-func validatePages(pages []wikiPage, wikiRoot string) (valid []wikiPage, dropped []string) {
+func validatePages(pages []wikiPage, wikiRoot string, global bool) (valid []wikiPage, dropped []string) {
 	dirs := wikiDirs(wikiRoot)
 	for _, p := range pages {
 		switch {
 		case p.Title == "" || p.BodyMarkdown == "":
 			dropped = append(dropped, fmt.Sprintf("page %q dropped: empty title or body_markdown", p.Path))
-		case !validPagePath(p.Path, dirs):
+		case !validPagePath(p.Path, dirs, global):
 			dropped = append(dropped, fmt.Sprintf("page %q dropped: path outside the wiki structure", p.Path))
 		default:
 			valid = append(valid, p)
@@ -568,8 +608,10 @@ func validatePages(pages []wikiPage, wikiRoot string) (valid []wikiPage, dropped
 
 // validPagePath accepts index.md, the native categories, and any top-level
 // folder already present in the wiki (dirs) — the LLM may not invent new
-// ones. trash/, _global/ and dot-prefixed segments are reserved.
-func validPagePath(p string, dirs map[string]bool) bool {
+// ones. In global mode any non-reserved top-level namespace is allowed (the
+// per-source-folder layout needs new ones). trash/, _global/ and dot-prefixed
+// segments are reserved.
+func validPagePath(p string, dirs map[string]bool, global bool) bool {
 	if !strings.HasSuffix(p, ".md") || strings.Contains(p, "..") ||
 		strings.HasPrefix(p, "/") || p != path.Clean(p) {
 		return false
@@ -591,7 +633,7 @@ func validPagePath(p string, dirs map[string]bool) bool {
 			return true
 		}
 	}
-	return dirs[first]
+	return global || dirs[first]
 }
 
 // warnReservedDirs tells the user when a wiki folder shadows a reserved
@@ -662,9 +704,12 @@ func readWiki(root string) map[string]string {
 	return wiki
 }
 
-func buildPrompt(rules string, wiki, digests map[string]string) string {
+func buildPrompt(rules string, wiki, digests map[string]string, global bool) string {
 	var b strings.Builder
 	b.WriteString(rules)
+	if global {
+		b.WriteString(globalPromptAddendum)
+	}
 	b.WriteString("\n\n--- CURRENT WIKI ---\n")
 	if len(wiki) == 0 {
 		b.WriteString("(empty)\n")
@@ -684,7 +729,11 @@ func buildPrompt(rules string, wiki, digests map[string]string) string {
 		}
 		fmt.Fprintf(&b, "\n%s\n", digests[p])
 	}
-	b.WriteString("\n--- OUTPUT FORMAT ---\n" + jsonContract + "\n")
+	contract := jsonContract
+	if global {
+		contract = jsonContractGlobal
+	}
+	b.WriteString("\n--- OUTPUT FORMAT ---\n" + contract + "\n")
 	return b.String()
 }
 
@@ -705,4 +754,3 @@ func continuationNote(digest string, wiki map[string]string) string {
 		" earlier work. Extend it: keep its existing sections and add this stretch."+
 		" Do not re-summarize it shorter.)", sid, page)
 }
-

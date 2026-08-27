@@ -260,7 +260,7 @@ func mcpWritePage(cwd, configPath string, in mcpWritePageIn) (mcpWriteOut, error
 		return mcpWriteOut{}, err
 	}
 	page := wikiPage{Path: in.Path, Title: in.Title, BodyMarkdown: in.BodyMarkdown, Tags: in.Tags}
-	if valid, dropped := validatePages([]wikiPage{page}, wikiRoot); len(valid) == 0 {
+	if valid, dropped := validatePages([]wikiPage{page}, wikiRoot, false); len(valid) == 0 {
 		return mcpWriteOut{}, errors.New(dropped[0])
 	}
 	dst := filepath.Join(wikiRoot, filepath.FromSlash(in.Path))
@@ -279,7 +279,7 @@ func mcpDeletePage(cwd, configPath, pagePath string) (mcpDeleteOut, error) {
 	if err != nil {
 		return mcpDeleteOut{}, err
 	}
-	if !validPagePath(pagePath, wikiDirs(wikiRoot)) {
+	if !validPagePath(pagePath, wikiDirs(wikiRoot), false) {
 		return mcpDeleteOut{}, fmt.Errorf("page path %q outside the wiki structure", pagePath)
 	}
 	dst, err := trashPage(wikiRoot, pagePath)

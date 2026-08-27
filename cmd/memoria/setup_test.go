@@ -292,3 +292,75 @@ func TestSetupAutoApply(t *testing.T) {
 		t.Fatal("auto_apply not disabled")
 	}
 }
+
+func TestSetupGlobalDisable(t *testing.T) {
+	_, cfgPath := initEnv(t)
+	if err := saveConfig(cfgPath, config{Global: true, GlobalPath: "/data/g"}); err != nil {
+		t.Fatal(err)
+	}
+	code, out := runSetupCmd(t, "--global=false")
+	if code != 0 {
+		t.Fatalf("setup = %d: %s", code, out)
+	}
+	cfg, _ := loadConfig(cfgPath)
+	if cfg.Global {
+		t.Fatal("global still enabled")
+	}
+	if cfg.GlobalPath != "/data/g" {
+		t.Fatalf("global_path = %q, want kept for a later re-enable", cfg.GlobalPath)
+	}
+}
+
+func TestSetupGlobalEnableKeepsPath(t *testing.T) {
+	_, cfgPath := initEnv(t)
+	root := t.TempDir()
+	if err := saveConfig(cfgPath, config{GlobalPath: root}); err != nil {
+		t.Fatal(err)
+	}
+	code, out := runSetupCmd(t, "--global")
+	if code != 0 {
+		t.Fatalf("setup = %d: %s", code, out)
+	}
+	cfg, _ := loadConfig(cfgPath)
+	if !cfg.Global || cfg.GlobalPath != root {
+		t.Fatalf("cfg = %+v, want enabled with the stored path kept", cfg)
+	}
+	if _, err := os.Stat(filepath.Join(root, "wiki", ".gitkeep")); err != nil {
+		t.Fatal("ensure steps skipped on re-enable")
+	}
+	if _, err := os.Stat(filepath.Join(root, "wiki", ".git")); !os.IsNotExist(err) {
+		t.Fatal("git touched for a global_path root")
+	}
+}
+
+func TestSetupGlobalPathChange(t *testing.T) {
+	_, cfgPath := initEnv(t)
+	if err := saveConfig(cfgPath, config{Global: true}); err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Join(t.TempDir(), "g")
+	code, out := runSetupCmd(t, "--global-path", root)
+	if code != 0 {
+		t.Fatalf("setup = %d: %s", code, out)
+	}
+	cfg, _ := loadConfig(cfgPath)
+	if !cfg.Global || cfg.GlobalPath != root {
+		t.Fatalf("cfg = %+v, want path moved with global kept on", cfg)
+	}
+	if _, err := os.Stat(filepath.Join(root, "wiki", ".gitkeep")); err != nil {
+		t.Fatal("new root not prepared")
+	}
+}
+
+func TestSetupGlobalPathErrors(t *testing.T) {
+	_, cfgPath := initEnv(t)
+	if err := saveConfig(cfgPath, config{}); err != nil {
+		t.Fatal(err)
+	}
+	if code, out := runSetupCmd(t, "--global-path", "/x"); code != 1 || !strings.Contains(out, "--global") {
+		t.Fatalf("path with global off: code=%d out=%q, want error pointing at --global", code, out)
+	}
+	if code, out := runSetupCmd(t, "--global=false", "--global-path", "/x"); code != 1 {
+		t.Fatalf("--global=false --global-path: code=%d out=%q, want error", code, out)
+	}
+}

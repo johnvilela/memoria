@@ -14,6 +14,10 @@ type project struct {
 	Wiki string `yaml:"wiki,omitempty"` // wiki folder name; empty means "wiki"
 }
 
+// globalName is the pseudo-project that pools sessions captured in
+// unregistered folders (global mode). Already reserved in validPagePath.
+const globalName = "_global"
+
 type config struct {
 	Projects          []project `yaml:"projects"`
 	Processor         string    `yaml:"processor,omitempty"`           // AI provider that processes sessions into wiki/memories
@@ -27,6 +31,8 @@ type config struct {
 	CronApply         bool      `yaml:"cron_apply,omitempty"`          // timer applies proposals without review
 	AutoApply         bool      `yaml:"auto_apply,omitempty"`          // autopilot: session end consolidates, proposals and lint fixes apply without review
 	Clients           []string  `yaml:"clients,omitempty"`             // agents with capture hooks installed
+	Global            bool      `yaml:"global,omitempty"`              // capture sessions in unregistered folders too (memoria bootstrap --global)
+	GlobalPath        string    `yaml:"global_path,omitempty"`         // global capture root; empty = the config folder
 }
 
 func loadConfig(path string) (config, error) {
@@ -75,6 +81,40 @@ func wikiRootFor(cfg config, proj string) string {
 		name = "wiki"
 	}
 	return filepath.Join(proj, name)
+}
+
+// globalRoot returns the global capture root: global_path, else the config dir.
+func globalRoot(cfg config, configPath string) string {
+	if cfg.GlobalPath != "" {
+		return filepath.Clean(cfg.GlobalPath)
+	}
+	return filepath.Dir(configPath)
+}
+
+// globalProject is the pseudo-project global sessions pool under; the empty
+// Wiki means the wiki lives at <root>/wiki like any project.
+func globalProject(cfg config, configPath string) project {
+	return project{Name: globalName, Path: globalRoot(cfg, configPath)}
+}
+
+// resolveProject maps cwd to its tracked project — registered projects always
+// win; the global pseudo-project is the fallback when global mode is on.
+func resolveProject(cfg config, configPath, cwd string) (project, bool) {
+	if proj := matchProject(cwd, cfg.Projects); proj != "" {
+		return projectAt(cfg, proj), true
+	}
+	if cfg.Global {
+		return globalProject(cfg, configPath), true
+	}
+	return project{}, false
+}
+
+// globalCommitCfg pins the wiki commit policy for global runs: the default
+// root's wiki is a repo memoria created purely to track it — always commit;
+// a global_path is the user's folder — never touch git.
+func globalCommitCfg(cfg config) config {
+	cfg.WikiAutoCommit = cfg.GlobalPath == ""
+	return cfg
 }
 
 // matchProject returns the longest tracked project path that contains cwd, or "".

@@ -650,7 +650,7 @@ func TestValidPagePath(t *testing.T) {
 		"concepts/.hidden.md": false, // dot-file reserved
 		"research.md":         false, // top-level file outside index.md
 	} {
-		if validPagePath(p, dirs) != want {
+		if validPagePath(p, dirs, false) != want {
 			t.Fatalf("validPagePath(%q) = %v, want %v", p, !want, want)
 		}
 	}
@@ -995,21 +995,207 @@ func TestBuildPromptFlagsContinuation(t *testing.T) {
 	fresh := "---\nsession_id: " + sid + "\n---\n\n@user-prompt 'more'\n"
 
 	t.Run("continuation with an existing page", func(t *testing.T) {
-		got := buildPrompt("rules", wiki, map[string]string{"/p/d-2.md": cont})
+		got := buildPrompt("rules", wiki, map[string]string{"/p/d-2.md": cont}, false)
 		if !strings.Contains(got, page) || !strings.Contains(got, "continues session") {
 			t.Errorf("prompt does not name the page to extend:\n%s", got)
 		}
 	})
 	t.Run("continuation with no existing page", func(t *testing.T) {
-		got := buildPrompt("rules", map[string]string{}, map[string]string{"/p/d-2.md": cont})
+		got := buildPrompt("rules", map[string]string{}, map[string]string{"/p/d-2.md": cont}, false)
 		if strings.Contains(got, "continues session") {
 			t.Error("flagged a continuation with nothing to extend")
 		}
 	})
 	t.Run("first incarnation", func(t *testing.T) {
-		got := buildPrompt("rules", wiki, map[string]string{"/p/d.md": fresh})
+		got := buildPrompt("rules", wiki, map[string]string{"/p/d.md": fresh}, false)
 		if strings.Contains(got, "continues session") {
 			t.Error("flagged a non-continuation")
 		}
 	})
+}
+
+func TestValidPagePathGlobal(t *testing.T) {
+	// global wiki: new per-source-folder namespaces are allowed even when the
+	// dir does not exist yet; reserved names stay rejected
+	for p, want := range map[string]bool{
+		"index.md":               true,
+		"concepts/x.md":          true,
+		"myfolder/concepts/x.md": true, // new namespace, empty dirs
+		"myfolder/x.md":          true,
+		"trash/x.md":             false,
+		"_global/x.md":           false,
+		".hidden/x.md":           false,
+		"a/../b.md":              false,
+		"x.md":                   false, // bare top-level file outside index.md
+	} {
+		if validPagePath(p, map[string]bool{}, true) != want {
+			t.Fatalf("validPagePath(%q, global) = %v, want %v", p, !want, want)
+		}
+	}
+	// project mode keeps rejecting unknown top-level folders
+	if validPagePath("myfolder/concepts/x.md", map[string]bool{}, false) {
+		t.Fatal("project mode accepted a new top-level folder")
+	}
+}
+
+func TestBuildPromptGlobal(t *testing.T) {
+	global := buildPrompt("RULES", nil, map[string]string{"d": "@user-prompt 'x'"}, true)
+	for _, w := range []string{"GLOBAL WIKI", "per-source-folder namespaces"} {
+		if !strings.Contains(global, w) {
+			t.Fatalf("global prompt missing %q", w)
+		}
+	}
+	if strings.Contains(global, "Do NOT invent new top-level folders") {
+		t.Fatal("global prompt kept the project-mode folder rule")
+	}
+	proj := buildPrompt("RULES", nil, map[string]string{"d": "@user-prompt 'x'"}, false)
+	if !strings.Contains(proj, "Do NOT invent new top-level folders") || strings.Contains(proj, "GLOBAL WIKI") {
+		t.Fatal("project prompt changed in non-global mode")
+	}
+}
+
+// global-mode fixture: global capture on, one ended _global session digest
+// under the global root, source folder recorded in the frontmatter
+func globalProcessFixture(t *testing.T, globalPath string) (root, cfgPath, digest string) {
+	t.Helper()
+	cfgPath = testGlobalConfig(t, globalPath)
+	root = globalPath
+	if root == "" {
+		root = filepath.Dir(cfgPath)
+	}
+	digest = digestFile(root, "g1")
+	if err := os.MkdirAll(filepath.Dir(digest), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := "---\nkind: session-digest\nsession_id: g1\nproject: srcfolder\nproject_root: /src/srcfolder\n---\n\n@user-prompt 'fix the thing'\n"
+	if err := os.WriteFile(digest, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := queueAdd(queuePath(cfgPath), globalName, digest); err != nil {
+		t.Fatal(err)
+	}
+	if err := queueMarkEnded(queuePath(cfgPath), globalName, digest); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "wiki"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return root, cfgPath, digest
+}
+
+const globalProposalPages = `{"pages":[
+	{"path":"srcfolder/concepts/thing.md","title":"Thing","tags":[],"body_markdown":"# Thing\n"},
+	{"path":"sessions/g1.md","title":"Session","tags":[],"body_markdown":"# Session\n"}
+]}`
+
+// stubCommitWiki records the WikiAutoCommit each commitWiki call saw
+func stubCommitWiki(t *testing.T) *[]bool {
+	t.Helper()
+	var got []bool
+	orig := commitWiki
+	commitWiki = func(cfg config, wikiRoot, action, summary string, count int) {
+		got = append(got, cfg.WikiAutoCommit)
+	}
+	t.Cleanup(func() { commitWiki = orig })
+	return &got
+}
+
+func TestProcessUnregisteredCwdUsesGlobal(t *testing.T) {
+	root, cfgPath, _ := globalProcessFixture(t, "")
+	prompt := stubProcessor(t, globalProposalPages, nil)
+	var buf bytes.Buffer
+	if code := runProcess(t.TempDir(), cfgPath, []string{"--foreground"}, &buf); code != 0 {
+		t.Fatalf("process = %d: %s", code, buf.String())
+	}
+	if _, err := os.Stat(filepath.Join(root, ".memoria", "proposal.json")); err != nil {
+		t.Fatal("proposal not written under the global root")
+	}
+	if !strings.Contains(*prompt, "GLOBAL WIKI") {
+		t.Fatal("prompt missing the global addendum")
+	}
+}
+
+func TestProcessUnregisteredCwdGlobalOffErrors(t *testing.T) {
+	cfgPath := testConfig(t)
+	var buf bytes.Buffer
+	if code := runProcess(t.TempDir(), cfgPath, nil, &buf); code != 1 {
+		t.Fatalf("process = %d, want 1: %s", code, buf.String())
+	}
+	if !strings.Contains(buf.String(), "not inside a tracked project") {
+		t.Fatalf("message changed: %s", buf.String())
+	}
+}
+
+func TestProcessApplyGlobalWritesAndCommits(t *testing.T) {
+	root, cfgPath, _ := globalProcessFixture(t, "")
+	stubProcessor(t, globalProposalPages, nil)
+	commits := stubCommitWiki(t)
+	src := t.TempDir()
+	var buf bytes.Buffer
+	if code := runProcess(src, cfgPath, []string{"--foreground"}, &buf); code != 0 {
+		t.Fatalf("generate = %d: %s", code, buf.String())
+	}
+	if code := runProcess(src, cfgPath, []string{"--apply"}, &buf); code != 0 {
+		t.Fatalf("apply = %d: %s", code, buf.String())
+	}
+	if _, err := os.Stat(filepath.Join(root, "wiki", "srcfolder", "concepts", "thing.md")); err != nil {
+		t.Fatal("namespaced page not written under the global wiki")
+	}
+	if _, err := os.Stat(filepath.Join(root, ".memoria", "sessions", "processed", "g1.md")); err != nil {
+		t.Fatal("digest not archived under the global root")
+	}
+	q, _ := loadQueue(queuePath(cfgPath))
+	if len(q[globalName]) != 0 {
+		t.Fatalf("queue not consumed: %+v", q)
+	}
+	// default global root: the wiki repo always commits
+	if len(*commits) != 1 || !(*commits)[0] {
+		t.Fatalf("commitWiki calls = %v, want one with auto-commit forced on", *commits)
+	}
+}
+
+func TestProcessApplyGlobalPathNoCommit(t *testing.T) {
+	root, cfgPath, _ := globalProcessFixture(t, t.TempDir())
+	stubProcessor(t, globalProposalPages, nil)
+	commits := stubCommitWiki(t)
+	src := t.TempDir()
+	var buf bytes.Buffer
+	if code := runProcess(src, cfgPath, []string{"--foreground"}, &buf); code != 0 {
+		t.Fatalf("generate = %d: %s", code, buf.String())
+	}
+	if code := runProcess(src, cfgPath, []string{"--apply"}, &buf); code != 0 {
+		t.Fatalf("apply = %d: %s", code, buf.String())
+	}
+	if _, err := os.Stat(filepath.Join(root, "wiki", "srcfolder", "concepts", "thing.md")); err != nil {
+		t.Fatal("page not written under the --global-path wiki")
+	}
+	// --global-path root: the user's git — commitWiki must see auto-commit off
+	if len(*commits) != 1 || (*commits)[0] {
+		t.Fatalf("commitWiki calls = %v, want one with auto-commit forced off", *commits)
+	}
+}
+
+func TestProcessAllSweepsGlobal(t *testing.T) {
+	root, cfgPath, _ := globalProcessFixture(t, "")
+	stubProcessor(t, globalProposalPages, nil)
+	cfg, err := loadConfig(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	if code := processAll(cfg, cfgPath, false, &buf); code != 0 {
+		t.Fatalf("processAll = %d: %s", code, buf.String())
+	}
+	if _, err := os.Stat(filepath.Join(root, ".memoria", "proposal.json")); err != nil {
+		t.Fatal("global pseudo-project not swept")
+	}
+
+	cfg.Global = false
+	var buf2 bytes.Buffer
+	if code := processAll(cfg, cfgPath, false, &buf2); code != 0 {
+		t.Fatalf("processAll global-off = %d: %s", code, buf2.String())
+	}
+	if !strings.Contains(buf2.String(), "Nothing to process") {
+		t.Fatalf("global-off sweep touched _global entries: %s", buf2.String())
+	}
 }

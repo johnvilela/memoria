@@ -32,8 +32,21 @@ func run(args []string, stdin io.Reader, out io.Writer) int {
 		wiki := fs.String("wiki", "", "wiki folder name (default \"wiki\")")
 		background := fs.Bool("background", false, "seed the wiki from git history in a detached background run")
 		seedFg := fs.Bool("seed-foreground", false, "internal: run the seed inline (spawned by --background)")
+		global := fs.Bool("global", false, "capture sessions in every folder, not just registered projects")
+		gpath := fs.String("global-path", "", "global capture root (default: the memoria config folder); requires --global")
 		if err := fs.Parse(args[1:]); err != nil {
 			return 1
+		}
+		if *gpath != "" && !*global {
+			fmt.Fprintln(out, "error: --global-path requires --global")
+			return 1
+		}
+		if *global {
+			if *wiki != "" || *background {
+				fmt.Fprintln(out, "error: --wiki and --background cannot be combined with --global")
+				return 1
+			}
+			return runBootstrapGlobal(defaultConfigPath(), *gpath, out)
 		}
 		cwd, err := os.Getwd()
 		if err != nil {

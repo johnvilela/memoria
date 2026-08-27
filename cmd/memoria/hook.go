@@ -168,18 +168,22 @@ func captureHook(name string, hookArgs []string, stdin io.Reader, configPath str
 	if err != nil {
 		return nil
 	}
-	proj := matchProject(cwd, cfg.Projects)
-	if proj == "" {
+	p, ok := resolveProject(cfg, configPath, cwd)
+	if !ok {
 		return nil
 	}
-	projName := projectAt(cfg, proj).Name
+	proj, projName := p.Path, p.Name
+	sourceRoot := ""
+	if projName == globalName {
+		sourceRoot = cwd
+	}
 	if name == "user-prompt" {
 		prompt, _ := payload["prompt"].(string)
 		if err := indexSession(proj, sid, prompt); err != nil {
 			return err
 		}
 	}
-	if err := appendDigest(proj, projName, sid, name, client, payload, queuePath(configPath)); err != nil {
+	if err := appendDigest(proj, projName, sourceRoot, sid, name, client, payload, queuePath(configPath)); err != nil {
 		return err
 	}
 	if client == "claude-code" && (name == "stop" || name == "session-end") {
@@ -264,8 +268,10 @@ func resolveDigestPath(proj, sid string) (path, continuesFrom string) {
 
 // appendDigest ensures the digest file exists (frontmatter written on first
 // event, whichever hook that is), appends the rendered event line, and keeps
-// the central pending queue in sync.
-func appendDigest(proj, projName, sid, name, client string, payload map[string]any, queueFile string) error {
+// the central pending queue in sync. sourceRoot is set only for global
+// captures: the digest lives under the global root but the frontmatter
+// records the session's real source folder.
+func appendDigest(proj, projName, sourceRoot, sid, name, client string, payload map[string]any, queueFile string) error {
 	line := renderEvent(name, payload)
 	if line == "" {
 		return nil
@@ -279,6 +285,10 @@ func appendDigest(proj, projName, sid, name, client string, payload map[string]a
 	// O_EXCL: only the first event of a session writes the frontmatter
 	if f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644); err == nil {
 		created = true
+		fmProject, fmRoot := projName, proj
+		if sourceRoot != "" {
+			fmProject, fmRoot = filepath.Base(sourceRoot), sourceRoot
+		}
 		link := ""
 		if continuesFrom != "" {
 			link = "continues_from: " + continuesFrom + "\n"
@@ -296,7 +306,7 @@ project_root: %s
 %sstarted_at: %s
 %s---
 
-`, sid, projName, proj, clientLine, now, link)
+`, sid, fmProject, fmRoot, clientLine, now, link)
 		f.Close()
 	} else if !os.IsExist(err) {
 		return err

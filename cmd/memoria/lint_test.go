@@ -406,3 +406,27 @@ func TestLintAutoAppliesFixes(t *testing.T) {
 		t.Fatalf("status = %+v, want applied detail", st[filepath.Base(proj)])
 	}
 }
+
+func TestLintUnregisteredCwdUsesGlobal(t *testing.T) {
+	cfgPath := testGlobalConfig(t, "")
+	root := filepath.Dir(cfgPath)
+	if err := os.MkdirAll(filepath.Join(root, ".memoria"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	finding := `{"kind":"stale","severity":"info","message":"old page","pages":["concepts/a.md"]}` + "\n"
+	if err := os.WriteFile(filepath.Join(root, ".memoria", "lint.jsonl"), []byte(finding), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	if code := runLint(t.TempDir(), cfgPath, []string{"--review"}, &buf); code != 0 {
+		t.Fatalf("lint = %d: %s", code, buf.String())
+	}
+	if !strings.Contains(buf.String(), "old page") {
+		t.Fatalf("global lint report not read: %s", buf.String())
+	}
+	// global off: unregistered cwd stays an error
+	var buf2 bytes.Buffer
+	if code := runLint(t.TempDir(), testConfig(t), []string{"--review"}, &buf2); code != 1 {
+		t.Fatalf("lint global-off = %d, want 1: %s", code, buf2.String())
+	}
+}

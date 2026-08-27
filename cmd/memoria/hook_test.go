@@ -608,3 +608,89 @@ func TestCaptureHookStopNoDigestNoError(t *testing.T) {
 		t.Fatalf("digest unexpectedly created: %v", err)
 	}
 }
+
+// writes a config.yaml with global capture on; the config's own dir doubles
+// as the default global root
+func testGlobalConfig(t *testing.T, globalPath string, projects ...string) string {
+	t.Helper()
+	cfg := config{Global: true, GlobalPath: globalPath}
+	for _, p := range projects {
+		cfg.Projects = append(cfg.Projects, project{Name: filepath.Base(p), Path: p})
+	}
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := saveConfig(path, cfg); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestCaptureHookGlobalCapture(t *testing.T) {
+	cfgPath := testGlobalConfig(t, "")
+	root := filepath.Dir(cfgPath)
+	src := t.TempDir() // unregistered folder
+	if err := captureHook("user-prompt", nil, promptPayload("g1", src, "hi"), cfgPath); err != nil {
+		t.Fatal(err)
+	}
+	got := readDigest(t, root, "g1")
+	for _, w := range []string{"project: " + filepath.Base(src), "project_root: " + src} {
+		if !strings.Contains(got, w) {
+			t.Fatalf("digest missing source identity %q:\n%s", w, got)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(src, ".memoria")); !os.IsNotExist(err) {
+		t.Fatal("wrote .memoria into the source folder")
+	}
+	q, _ := loadQueue(queuePath(cfgPath))
+	if len(q[globalName]) != 1 || q[globalName][0].Path != digestFile(root, "g1") {
+		t.Fatalf("queue = %+v, want one _global entry at the global root", q)
+	}
+}
+
+func TestCaptureHookGlobalPathRoot(t *testing.T) {
+	root := t.TempDir()
+	cfgPath := testGlobalConfig(t, root)
+	src := t.TempDir()
+	if err := captureHook("user-prompt", nil, promptPayload("g1", src, "hi"), cfgPath); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(digestFile(root, "g1")); err != nil {
+		t.Fatal("digest not under the global_path root")
+	}
+}
+
+func TestCaptureHookRegisteredProjectUnaffectedByGlobal(t *testing.T) {
+	proj := t.TempDir()
+	cfgPath := testGlobalConfig(t, "", proj)
+	if err := captureHook("user-prompt", nil, promptPayload("s1", proj, "hi"), cfgPath); err != nil {
+		t.Fatal(err)
+	}
+	got := readDigest(t, proj, "s1")
+	for _, w := range []string{"project: " + filepath.Base(proj), "project_root: " + proj} {
+		if !strings.Contains(got, w) {
+			t.Fatalf("digest missing %q:\n%s", w, got)
+		}
+	}
+	q, _ := loadQueue(queuePath(cfgPath))
+	if len(q[globalName]) != 0 {
+		t.Fatalf("registered session leaked into the _global queue: %+v", q)
+	}
+}
+
+func TestCaptureHookGlobalAutoApplySpawns(t *testing.T) {
+	cfgPath := testGlobalConfig(t, "")
+	setAutoApply(t, cfgPath)
+	root := filepath.Dir(cfgPath)
+	src := t.TempDir()
+	spawned := stubSpawn(t, 4242)
+	if err := captureHook("session-end", nil, payload("g1", src), cfgPath); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{root, "process", "--foreground"}
+	if strings.Join(*spawned, " ") != strings.Join(want, " ") {
+		t.Fatalf("spawned %v, want %v", *spawned, want)
+	}
+	st, _ := loadStatus(statusPath(cfgPath))
+	if st[globalName].State != "running" || st[globalName].PID != 4242 {
+		t.Fatalf("status = %+v, want _global running", st[globalName])
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 )
@@ -81,6 +82,119 @@ func runBootstrap(cwd, configPath, wikiName string, background, seedForeground b
 	fmt.Fprintf(out, "Registered %s (%s)\n", filepath.Base(cwd), cwd)
 	writeAgentsFiles(cwd, folder, out)
 	return maybeSeedWiki(cfg, project{Name: filepath.Base(cwd), Path: cwd, Wiki: wikiName}, configPath, background, out)
+}
+
+// runBootstrapGlobal enables global capture: sessions in unregistered folders
+// are captured under root (global_path; default: the config folder), wiki at
+// <root>/wiki. Default root: the wiki gets its own git repo — never the config
+// dir itself, config.yaml can hold an API key. --global-path root: the user's folder,
+// git is never touched. Idempotent; re-runs repair the folder structure.
+func runBootstrapGlobal(configPath, path string, out io.Writer) int {
+	cfg, err := loadConfig(configPath)
+	if err != nil && !os.IsNotExist(err) {
+		// never rewrite a config we couldn't parse
+		fmt.Fprintln(out, "error:", err)
+		return 1
+	}
+	if path != "" {
+		if path, err = filepath.Abs(path); err != nil {
+			fmt.Fprintln(out, "error:", err)
+			return 1
+		}
+	}
+	wasEnabled, oldRoot := cfg.Global, globalRoot(cfg, configPath)
+	cfg.Global, cfg.GlobalPath = true, path
+	root := globalRoot(cfg, configPath)
+
+	if wasEnabled && oldRoot == root {
+		fmt.Fprintf(out, "global capture already enabled (%s)\n", root)
+	} else if wasEnabled {
+		fmt.Fprintf(out, "note: global root changed from %s to %s — existing captures stay at %s\n", oldRoot, root, oldRoot)
+		// ponytail: no migration — old-root pending entries are processed there by hand
+		q, _ := loadQueue(queuePath(configPath))
+		stranded := 0
+		for _, e := range q[globalName] {
+			if !strings.HasPrefix(e.Path, root+string(filepath.Separator)) {
+				stranded++
+			}
+		}
+		if stranded > 0 {
+			fmt.Fprintf(out, "warning: %d pending global session(s) still reference the old root — run memoria process there first\n", stranded)
+		}
+	}
+
+	wikiPath := filepath.Join(root, "wiki")
+	if err := os.MkdirAll(wikiPath, 0o755); err != nil {
+		fmt.Fprintln(out, "error:", err)
+		return 1
+	}
+	gitkeep := filepath.Join(wikiPath, ".gitkeep")
+	if _, err := os.Stat(gitkeep); os.IsNotExist(err) {
+		if err := os.WriteFile(gitkeep, nil, 0o644); err != nil {
+			fmt.Fprintln(out, "error:", err)
+			return 1
+		}
+	}
+	if path == "" {
+		// default root: the wiki tracks itself in its own repo
+		if _, err := os.Stat(filepath.Join(wikiPath, ".git")); os.IsNotExist(err) {
+			if b, err := exec.Command("git", "init", wikiPath).CombinedOutput(); err != nil {
+				fmt.Fprintf(out, "warning: git init: %v (%s)\n", err, collapse(string(b), 200))
+			}
+		}
+		// surface git problems (missing identity) now, not on the first silent auto-commit
+		if err := commitWikiGit(wikiPath, "docs(wiki): init global wiki"); err != nil && err != errNothingToCommit {
+			fmt.Fprintln(out, "warning: initial wiki commit:", err)
+		}
+	}
+	if err := saveConfig(configPath, cfg); err != nil {
+		fmt.Fprintln(out, "error:", err)
+		return 1
+	}
+	fmt.Fprintf(out, "Global capture enabled — sessions in unregistered folders are captured to %s (wiki: %s)\n", root, wikiPath)
+	if path == "" {
+		fmt.Fprintln(out, "Wiki changes are tracked in their own git repo")
+	} else {
+		fmt.Fprintln(out, "Git in this folder is yours to manage — memoria will not commit")
+	}
+	return 0
+}
+
+// applyGlobalSetting is setup's --global/--global-path handler: disable global
+// capture (keeping global_path for a later re-enable), enable it, or move the
+// root — enable and move reuse the bootstrap ensure logic. It reloads the
+// config so earlier setup writes in the same run aren't clobbered.
+func applyGlobalSetting(enable, enableSet bool, path string, pathSet bool, configPath string, out io.Writer) int {
+	cfg, err := loadConfig(configPath)
+	if err != nil {
+		fmt.Fprintln(out, "error:", err)
+		return 1
+	}
+	if enableSet && !enable {
+		if pathSet {
+			fmt.Fprintln(out, "error: --global-path cannot be combined with --global=false")
+			return 1
+		}
+		if !cfg.Global {
+			fmt.Fprintln(out, "global capture already disabled")
+			return 0
+		}
+		cfg.Global = false // global_path is kept so re-enabling finds the same root
+		if err := saveConfig(configPath, cfg); err != nil {
+			fmt.Fprintln(out, "error:", err)
+			return 1
+		}
+		fmt.Fprintln(out, "Global capture disabled — captures and wiki stay at", globalRoot(cfg, configPath))
+		return 0
+	}
+	if pathSet && !enableSet && !cfg.Global {
+		fmt.Fprintln(out, "error: global capture is off — enable it with --global")
+		return 1
+	}
+	if !pathSet {
+		path = cfg.GlobalPath // bare --global keeps the stored root
+	}
+	return runBootstrapGlobal(configPath, path, out)
 }
 
 const memoriaBlockTmpl = `<!-- memoria:start -->

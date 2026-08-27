@@ -144,7 +144,7 @@ func seedWiki(cfg config, dir, wikiRoot, configPath string, out io.Writer) (stri
 	if _, err := parseProcessorJSON(raw, dir, "seed", out, &pp); err != nil {
 		return "", err
 	}
-	pages, dropped := validatePages(pp.Pages, wikiRoot)
+	pages, dropped := validatePages(pp.Pages, wikiRoot, false)
 	for _, d := range dropped {
 		fmt.Fprintln(out, "warning:", d)
 		logf("seed", "warning: %s", d)

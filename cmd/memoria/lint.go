@@ -78,12 +78,15 @@ func runLint(cwd, configPath string, args []string, out io.Writer) int {
 		fmt.Fprintln(out, "error:", err)
 		return 1
 	}
-	proj := matchProject(cwd, cfg.Projects)
-	if proj == "" {
+	p, ok := resolveProject(cfg, configPath, cwd)
+	if !ok {
 		fmt.Fprintln(out, "error: not inside a tracked project (run memoria bootstrap first)")
 		return 1
 	}
-	p := projectAt(cfg, proj)
+	if p.Name == globalName {
+		cfg = globalCommitCfg(cfg)
+	}
+	proj := p.Path
 	wikiName := p.Wiki
 	if wikiName == "" {
 		wikiName = "wiki"
@@ -376,7 +379,7 @@ func validateLintFix(pages []lintPage, findings []lintFinding, wikiRoot string) 
 		}
 	}
 	for _, p := range pages {
-		if !validPagePath(p.Path, dirs) {
+		if !validPagePath(p.Path, dirs, false) {
 			dropped = append(dropped, fmt.Sprintf("page %q dropped: path outside the wiki structure", p.Path))
 			continue
 		}
