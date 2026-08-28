@@ -138,6 +138,33 @@ func TestQueueRemove(t *testing.T) {
 	}
 }
 
+func TestQueueDropProject(t *testing.T) {
+	q := filepath.Join(t.TempDir(), "pending.yaml")
+	if err := queueAdd(q, "memoria", "/p/a.md"); err != nil {
+		t.Fatal(err)
+	}
+	if err := queueAdd(q, "memoria", "/p/b.md"); err != nil {
+		t.Fatal(err)
+	}
+	if err := queueAdd(q, "other", "/o/c.md"); err != nil {
+		t.Fatal(err)
+	}
+	if err := queueDropProject(q, "memoria"); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(q)
+	if strings.Contains(string(b), "memoria") || !strings.Contains(string(b), "/o/c.md") {
+		t.Fatalf("drop wrong:\n%s", b)
+	}
+	// absent key and missing file: no-ops
+	if err := queueDropProject(q, "ghost"); err != nil {
+		t.Fatal(err)
+	}
+	if err := queueDropProject(filepath.Join(t.TempDir(), "pending.yaml"), "memoria"); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestQueueConcurrentAdds(t *testing.T) {
 	q := filepath.Join(t.TempDir(), "pending.yaml")
 	var wg sync.WaitGroup

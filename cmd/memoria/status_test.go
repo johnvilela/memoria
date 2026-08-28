@@ -37,6 +37,36 @@ func TestStatusSetAndLoad(t *testing.T) {
 	}
 }
 
+func TestStatusDelete(t *testing.T) {
+	sp := filepath.Join(t.TempDir(), "status.yaml")
+	if err := statusSet(sp, "gone", "done", 0, "ok"); err != nil {
+		t.Fatal(err)
+	}
+	if err := statusSet(sp, "kept", "done", 0, "ok"); err != nil {
+		t.Fatal(err)
+	}
+	if err := statusDelete(sp, "gone"); err != nil {
+		t.Fatal(err)
+	}
+	st, err := loadStatus(sp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := st["gone"]; ok {
+		t.Fatal("entry not deleted")
+	}
+	if _, ok := st["kept"]; !ok {
+		t.Fatal("other entry dropped")
+	}
+	// absent key and missing file: no-ops
+	if err := statusDelete(sp, "ghost"); err != nil {
+		t.Fatal(err)
+	}
+	if err := statusDelete(filepath.Join(t.TempDir(), "status.yaml"), "gone"); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestPidAlive(t *testing.T) {
 	if !pidAlive(os.Getpid()) {
 		t.Fatal("own pid should be alive")

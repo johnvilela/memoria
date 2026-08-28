@@ -69,6 +69,26 @@ func statusSet(path, projName, state string, pid int, detail string) error {
 	})
 }
 
+// statusDelete drops a project's entry (memoria remove); an absent entry is
+// a no-op.
+func statusDelete(path, projName string) error {
+	return withFlock(path, func() error {
+		st, err := loadStatus(path)
+		if err != nil {
+			return err
+		}
+		if _, ok := st[projName]; !ok {
+			return nil
+		}
+		delete(st, projName)
+		b, err := yaml.Marshal(st)
+		if err != nil {
+			return err
+		}
+		return writeFileAtomic(path, b)
+	})
+}
+
 // runLogPath is where a project's detached run writes its stdout/stderr,
 // truncated on each new run. process/lint/seed share it — one background job
 // per project at a time.

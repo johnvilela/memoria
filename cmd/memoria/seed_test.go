@@ -286,6 +286,51 @@ func TestBootstrapSeedForegroundChild(t *testing.T) {
 	}
 }
 
+func TestBootstrapAdoptedWikiSeedsOnlyWhenEmpty(t *testing.T) {
+	// empty pre-existing wiki: adopted, and seeding is still offered
+	dir := gitDir(t, true)
+	if err := os.Mkdir(filepath.Join(dir, "wiki"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfgPath := seedConfig(t, config{Processor: "claude-code"})
+	spawned := stubSpawn(t, 4242)
+	var out strings.Builder
+	if code := runBootstrap(dir, cfgPath, "", true, false, &out); code != 0 {
+		t.Fatalf("adopt empty = %d: %s", code, out.String())
+	}
+	if !strings.Contains(out.String(), "Adopted") {
+		t.Fatalf("missing Adopted: %s", out.String())
+	}
+	if len(*spawned) != 3 || (*spawned)[2] != "--seed-foreground" {
+		t.Fatalf("empty adopted wiki did not seed: %v", *spawned)
+	}
+
+	// pre-existing wiki with a page: adopted, never seeded
+	dir2 := gitDir(t, true)
+	page := filepath.Join(dir2, "wiki", "index.md")
+	if err := os.MkdirAll(filepath.Dir(page), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(page, []byte("# Home\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfgPath2 := seedConfig(t, config{Processor: "claude-code"})
+	*spawned = nil
+	out.Reset()
+	if code := runBootstrap(dir2, cfgPath2, "", true, false, &out); code != 0 {
+		t.Fatalf("adopt with pages = %d: %s", code, out.String())
+	}
+	if !strings.Contains(out.String(), "Adopted") {
+		t.Fatalf("missing Adopted: %s", out.String())
+	}
+	if len(*spawned) != 0 {
+		t.Fatalf("seeded an adopted wiki with pages: %v", *spawned)
+	}
+	if b, _ := os.ReadFile(page); string(b) != "# Home\n" {
+		t.Fatalf("adopted page touched: %q", b)
+	}
+}
+
 func TestBootstrapRerunEmptyWikiSeeds(t *testing.T) {
 	dir := gitDir(t, true)
 	cfgPath := filepath.Join(t.TempDir(), "memoria", "config.yaml")
