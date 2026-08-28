@@ -104,6 +104,22 @@ func queueRemove(path, projName, digestPath string) error {
 	})
 }
 
+// queueDropProject deletes every pending entry of a project (memoria remove);
+// an absent key is a no-op.
+func queueDropProject(path, projName string) error {
+	return withFlock(path, func() error {
+		q, err := loadQueue(path)
+		if err != nil {
+			return err
+		}
+		if _, ok := q[projName]; !ok {
+			return nil
+		}
+		delete(q, projName)
+		return saveQueue(path, q)
+	})
+}
+
 // queueMarkEnded flags the entry so the cron knows the session finished; an
 // absent entry (queue file deleted mid-session) is created already ended.
 func queueMarkEnded(path, projName, digestPath string) error {

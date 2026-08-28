@@ -12,8 +12,10 @@ import (
 // runBootstrap registers cwd as a tracked project in the config file,
 // gitignores .memoria/, creates the wiki folder (wikiName, default "wiki";
 // custom names are saved in the config) and offers to seed it from git
-// history. An existing wiki folder is an error. seedForeground is the
-// internal child mode spawned by --background: seed only, no registration.
+// history. An existing wiki folder is adopted as-is — registration only,
+// seeding offered just when it has no pages; a non-directory at the wiki
+// path is an error. seedForeground is the internal child mode spawned by
+// --background: seed only, no registration.
 func runBootstrap(cwd, configPath, wikiName string, background, seedForeground bool, out io.Writer) int {
 	cwd = filepath.Clean(cwd)
 
@@ -49,10 +51,15 @@ func runBootstrap(cwd, configPath, wikiName string, background, seedForeground b
 		folder = "wiki"
 	}
 	wikiPath := filepath.Join(cwd, folder)
-	if _, err := os.Stat(wikiPath); err == nil {
-		// fail before writing anything, so a retry with --wiki works fully
-		fmt.Fprintf(out, "error: %s already exists, pick another name with --wiki <name>\n", wikiPath)
-		return 1
+	adopt := false
+	if fi, err := os.Stat(wikiPath); err == nil {
+		if !fi.IsDir() {
+			// fail before writing anything, so a retry with --wiki works fully
+			fmt.Fprintf(out, "error: %s exists and is not a folder, pick another name with --wiki <name>\n", wikiPath)
+			return 1
+		}
+		// pre-existing wiki (e.g. the project folder was renamed): adopt it
+		adopt = true
 	}
 
 	if _, err := os.Stat(filepath.Join(cwd, ".git")); err == nil {
@@ -65,13 +72,15 @@ func runBootstrap(cwd, configPath, wikiName string, background, seedForeground b
 		// the wiki lives outside version control — say so once
 		fmt.Fprintln(out, "warning: "+cwd+" is not a git repository — the wiki will not be versioned")
 	}
-	if err := os.MkdirAll(wikiPath, 0o755); err != nil {
-		fmt.Fprintln(out, "error:", err)
-		return 1
-	}
-	if err := os.WriteFile(filepath.Join(wikiPath, ".gitkeep"), nil, 0o644); err != nil {
-		fmt.Fprintln(out, "error:", err)
-		return 1
+	if !adopt {
+		if err := os.MkdirAll(wikiPath, 0o755); err != nil {
+			fmt.Fprintln(out, "error:", err)
+			return 1
+		}
+		if err := os.WriteFile(filepath.Join(wikiPath, ".gitkeep"), nil, 0o644); err != nil {
+			fmt.Fprintln(out, "error:", err)
+			return 1
+		}
 	}
 
 	cfg.Projects = append(cfg.Projects, project{Name: filepath.Base(cwd), Path: cwd, Wiki: wikiName})
@@ -80,7 +89,15 @@ func runBootstrap(cwd, configPath, wikiName string, background, seedForeground b
 		return 1
 	}
 	fmt.Fprintf(out, "Registered %s (%s)\n", filepath.Base(cwd), cwd)
+	if adopt {
+		fmt.Fprintf(out, "Adopted existing wiki folder %s\n", wikiPath)
+		warnReservedDirs(wikiPath, out)
+	}
 	writeAgentsFiles(cwd, folder, out)
+	if adopt && len(readWiki(wikiPath)) > 0 {
+		// a wiki with content is never seeded or modified
+		return 0
+	}
 	return maybeSeedWiki(cfg, project{Name: filepath.Base(cwd), Path: cwd, Wiki: wikiName}, configPath, background, out)
 }
 

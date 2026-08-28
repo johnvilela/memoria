@@ -121,16 +121,63 @@ func TestBootstrapCreatesWikiAndGitignore(t *testing.T) {
 	}
 }
 
-func TestBootstrapWikiExistsFails(t *testing.T) {
+func TestBootstrapAdoptsExistingWiki(t *testing.T) {
+	// the rename trap: a project folder renamed after registration still has
+	// its wiki — bootstrap must re-register it, adopting the wiki as-is
+	proj := t.TempDir()
+	mkGitDir(t, proj)
+	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+	page := filepath.Join(proj, "wiki", "concepts", "a.md")
+	if err := os.MkdirAll(filepath.Dir(page), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(page, []byte("# A\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var out strings.Builder
+	if code := runBootstrap(proj, cfgPath, "", false, false, &out); code != 0 {
+		t.Fatalf("exit = %d, want 0 (out: %s)", code, out.String())
+	}
+	for _, w := range []string{"Registered", "Adopted"} {
+		if !strings.Contains(out.String(), w) {
+			t.Fatalf("output %q missing %s", out.String(), w)
+		}
+	}
+	cfg, err := loadConfig(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Projects) != 1 || cfg.Projects[0].Path != proj {
+		t.Fatalf("projects = %+v, want %s registered", cfg.Projects, proj)
+	}
+	if b, _ := os.ReadFile(page); string(b) != "# A\n" {
+		t.Fatalf("adopted wiki page touched: %q", b)
+	}
+	if _, err := os.Stat(filepath.Join(proj, "wiki", ".gitkeep")); !os.IsNotExist(err) {
+		t.Fatal(".gitkeep written into an adopted wiki")
+	}
+	if b, _ := os.ReadFile(filepath.Join(proj, ".gitignore")); !strings.Contains(string(b), ".memoria/\n") {
+		t.Fatalf(".gitignore %q missing .memoria/ entry", b)
+	}
+	if _, err := os.Stat(filepath.Join(proj, "AGENTS.md")); err != nil {
+		t.Fatal("AGENTS.md not written on adoption:", err)
+	}
+}
+
+func TestBootstrapWikiPathIsFileFails(t *testing.T) {
 	proj := t.TempDir()
 	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
-	if err := os.Mkdir(filepath.Join(proj, "wiki"), 0o755); err != nil {
+	if err := os.WriteFile(filepath.Join(proj, "wiki"), []byte("not a folder"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
 	var out strings.Builder
 	if code := runBootstrap(proj, cfgPath, "", false, false, &out); code != 1 {
 		t.Fatalf("exit = %d, want 1 (out: %s)", code, out.String())
+	}
+	if !strings.Contains(out.String(), "not a folder") {
+		t.Fatalf("output %q missing not-a-folder error", out.String())
 	}
 	if _, err := os.Stat(cfgPath); !os.IsNotExist(err) {
 		t.Fatal("config written despite wiki error")
