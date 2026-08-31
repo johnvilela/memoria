@@ -131,13 +131,10 @@ func digestForeground(cfg config, proj, wikiRoot, configPath, projName, sid stri
 	if !strings.HasPrefix(strings.TrimSpace(body), "#") {
 		body = "# " + pg.Title + "\n\n" + body
 	}
-	if err := os.MkdirAll(filepath.Dir(pagePath), 0o755); err != nil {
-		return fail(err)
-	}
-	if err := os.WriteFile(pagePath, []byte(renderPage(pg.Tags, body)), 0o644); err != nil {
-		return fail(err)
-	}
 	rel := "sessions/" + sid + ".md"
+	if err := writeWikiPage(wikiRoot, rel, pg.Tags, body); err != nil {
+		return fail(err)
+	}
 	commitWiki(cfg, wikiRoot, "session digest", rel, 1)
 	fmt.Fprintf(out, "wrote %s\n", pagePath)
 	detail := "session page written: " + rel

@@ -120,6 +120,7 @@ func TestMCPRecall(t *testing.T) {
 
 func TestMCPWritePage(t *testing.T) {
 	proj, cfgPath := mcpFixture(t)
+	stubNow(t, "2026-08-31")
 	res, err := mcpWritePage(proj, cfgPath, mcpWritePageIn{
 		Path: "sessions/s1.md", Title: "S1", BodyMarkdown: "# S1\n\nnotes\n", Tags: []string{"a", "b"},
 	})
@@ -130,7 +131,7 @@ func TestMCPWritePage(t *testing.T) {
 		t.Fatalf("res = %+v", res)
 	}
 	b, _ := os.ReadFile(filepath.Join(proj, "wiki", "sessions", "s1.md"))
-	if string(b) != "---\ntags: [a, b]\n---\n\n# S1\n\nnotes\n" {
+	if string(b) != "---\ntags: [a, b]\nlastUsed: 2026-08-31\n---\n\n# S1\n\nnotes\n" {
 		t.Fatalf("page = %q", b)
 	}
 	for _, bad := range []mcpWritePageIn{

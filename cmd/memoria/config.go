@@ -33,6 +33,8 @@ type config struct {
 	Clients           []string  `yaml:"clients,omitempty"`             // agents with capture hooks installed
 	Global            bool      `yaml:"global,omitempty"`              // capture sessions in unregistered folders too (memoria bootstrap --global)
 	GlobalPath        string    `yaml:"global_path,omitempty"`         // global capture root; empty = the config folder
+	DecaySoftDays     int       `yaml:"decay_soft_days,omitempty"`     // days a sessions/ page can go unused before the sweep trashes it; 0 = 15
+	DecayHardDays     int       `yaml:"decay_hard_days,omitempty"`     // days before an unused trashed sessions/ page is purged for good; 0 = 30
 }
 
 func loadConfig(path string) (config, error) {

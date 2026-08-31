@@ -32,7 +32,7 @@ const (
 	folderRuleGlobal  = `"path" is relative to the wiki root, always ending in .md. Valid targets: "index.md", the shared categories concepts/, decisions/, gotchas/, rules/, sessions/, and per-source-folder namespaces "<folder>/..." named exactly after a digest's "project" frontmatter value (e.g. "myapp/concepts/x.md"). trash/, _global/ and dot-folders are reserved.`
 	jsonContractTail  = `
 The episodic session page goes at "sessions/<session_id>.md" (session_id from the digest frontmatter).
-"body_markdown" is the page body without frontmatter — memoria writes the tags frontmatter itself.
+"body_markdown" is the page body without frontmatter — memoria writes the tags and lastUsed frontmatter itself; never author frontmatter.
 "tags" are 0-5 short kebab-case tags. 1-5 pages.
 Escape every " inside a string value as \" and every newline as \n — one raw quote in a body breaks the whole batch.`
 	jsonContract       = jsonContractHead + folderRuleProject + jsonContractTail
@@ -216,6 +216,19 @@ func processAll(cfg config, configPath string, apply bool, out io.Writer) int {
 			cfg = globalCommitCfg(cfg)
 		}
 		root := filepath.Clean(p.Path)
+		sPath := statusPath(configPath)
+		if st, _ := loadStatus(sPath); st[p.Name].State == "running" && pidAlive(st[p.Name].PID) {
+			fmt.Fprintf(out, "%s: processing already running (pid %d), skipped\n", p.Name, st[p.Name].PID)
+			continue
+		}
+		wikiName := p.Wiki
+		if wikiName == "" {
+			wikiName = "wiki"
+		}
+		wikiRoot := filepath.Join(root, wikiName)
+		// the sweep runs on every pass, sessions pending or not — this loop is
+		// the cron's background context, never an agent-facing call
+		decaySweep(cfg, wikiRoot, out)
 		sessions, _, err := collectEnded(queuePath(configPath), p.Name)
 		if err != nil {
 			fmt.Fprintln(out, "error:", err)
@@ -225,19 +238,9 @@ func processAll(cfg config, configPath string, apply bool, out io.Writer) int {
 		if len(sessions) == 0 {
 			continue
 		}
-		sPath := statusPath(configPath)
-		if st, _ := loadStatus(sPath); st[p.Name].State == "running" && pidAlive(st[p.Name].PID) {
-			fmt.Fprintf(out, "%s: processing already running (pid %d), skipped\n", p.Name, st[p.Name].PID)
-			continue
-		}
 		if err := statusSet(sPath, p.Name, "running", os.Getpid(), ""); err != nil {
 			logf("process", "%s: status: %v", p.Name, err)
 		}
-		wikiName := p.Wiki
-		if wikiName == "" {
-			wikiName = "wiki"
-		}
-		wikiRoot := filepath.Join(root, wikiName)
 		proposalPath := filepath.Join(root, ".memoria", "proposal.json")
 		worked++
 		if code := generateProposal(cfg, root, wikiRoot, proposalPath, configPath, p.Name, out); code != 0 {
@@ -522,16 +525,11 @@ func applyProposal(cfg config, proj, wikiRoot, proposalPath, qPath, projName str
 	}
 	prop.Pages = pages
 	for _, pg := range prop.Pages {
-		dst := filepath.Join(wikiRoot, filepath.FromSlash(pg.Path))
-		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		if err := writeWikiPage(wikiRoot, pg.Path, pg.Tags, pg.BodyMarkdown); err != nil {
 			fmt.Fprintln(out, "error:", err)
 			return 1
 		}
-		if err := os.WriteFile(dst, []byte(renderPage(pg.Tags, pg.BodyMarkdown)), 0o644); err != nil {
-			fmt.Fprintln(out, "error:", err)
-			return 1
-		}
-		fmt.Fprintf(out, "wrote %s\n", dst)
+		fmt.Fprintf(out, "wrote %s\n", filepath.Join(wikiRoot, filepath.FromSlash(pg.Path)))
 	}
 	processedDir := filepath.Join(proj, ".memoria", "sessions", "processed")
 	if err := os.MkdirAll(processedDir, 0o755); err != nil {

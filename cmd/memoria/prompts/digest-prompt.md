@@ -38,7 +38,8 @@ history only when useful, but must not be presented as current fact.
 4. Aggregate per-tool-call detail. Don't echo every Read/Edit
    tool invocation; summarise what was learned.
 5. Do NOT echo timestamps or session IDs (frontmatter already
-   has them).
+   has them). Never emit YAML frontmatter or a `lastUsed` line —
+   memoria writes the tags and lastUsed frontmatter itself.
 6. Tags: 0-5 short kebab-case tags surfaced to frontmatter.
 7. Length follows the observations: as long as they warrant,
    no longer. Don't pad with generic tutorial filler, but

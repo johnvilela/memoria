@@ -4,7 +4,6 @@ import (
 	_ "embed"
 	"fmt"
 	"io"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -157,14 +156,10 @@ func seedWiki(cfg config, dir, wikiRoot, configPath string, out io.Writer) (stri
 		pp.Rationale += fmt.Sprintf(" (%d invalid page(s) dropped)", len(dropped))
 	}
 	for _, pg := range pp.Pages {
-		dst := filepath.Join(wikiRoot, filepath.FromSlash(pg.Path))
-		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		if err := writeWikiPage(wikiRoot, pg.Path, pg.Tags, pg.BodyMarkdown); err != nil {
 			return "", err
 		}
-		if err := os.WriteFile(dst, []byte(renderPage(pg.Tags, pg.BodyMarkdown)), 0o644); err != nil {
-			return "", err
-		}
-		fmt.Fprintf(out, "wrote %s\n", dst)
+		fmt.Fprintf(out, "wrote %s\n", filepath.Join(wikiRoot, filepath.FromSlash(pg.Path)))
 	}
 	paths := make([]string, len(pp.Pages))
 	for i, pg := range pp.Pages {

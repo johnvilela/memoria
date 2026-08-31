@@ -466,6 +466,9 @@ func runRun(cwd, configPath string, args []string, out io.Writer) int {
 		} else if agentArgs = nativeResume(bin, digestClient(digest), chosen.sid); agentArgs == nil {
 			agentArgs = []string{buildHandoff(proj, wikiRootFor(cfg, proj), chosen.sid, digest, true)}
 		}
+		// resuming counts as usage on both paths — native resume never reads
+		// the wiki page, so key on the sid rather than the read
+		touchLastUsed(wikiRootFor(cfg, proj), "sessions/"+chosen.sid+".md")
 	}
 	code, err := runAgent(proj, bin, agentArgs...)
 	if err != nil {

@@ -28,6 +28,8 @@ Given the findings and the full content of the pages involved, return the
 smallest set of page changes that removes the conflict: update a page to fix a
 contradiction, delete (move to the wiki's trash/) a page that is stale or
 fully duplicated elsewhere. Only touch the pages listed in the findings.
+Never author, copy, or edit a lastUsed frontmatter line — memoria maintains
+that field itself.
 
 Output ONLY a JSON object, no code fences, no commentary:
 {"pages":[{"action":"update"|"create"|"delete","path":"...","title":"...","content":"full markdown"}]}
@@ -291,6 +293,9 @@ func lintApply(cfg config, wikiRoot, lintPath string, out io.Writer) int {
 			fmt.Fprintln(out, "error:", err)
 			return 1
 		}
+		// lint is the one writer whose LLM authors full files, frontmatter
+		// included — re-inject the deterministic lastUsed over whatever it wrote
+		pg.Content = stampSessions(wikiRoot, pg.Path, pg.Content)
 		if err := os.WriteFile(dst, []byte(pg.Content), 0o644); err != nil {
 			fmt.Fprintln(out, "error:", err)
 			return 1

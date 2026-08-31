@@ -54,6 +54,8 @@ func runSearch(cwd, configPath string, args []string, out io.Writer) int {
 			return 1
 		}
 	}
+	// content delivery counts as usage; path-only listings above don't
+	touchLastUsed(wikiRoot, choice)
 	fmt.Fprint(out, wiki[choice])
 	return 0
 }
