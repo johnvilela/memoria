@@ -23,6 +23,7 @@ Start with [[concepts/architecture-overview]] for the pipeline end to end.
 - [[concepts/self-update-command]] — `memoria update`: checks GitHub releases, checksum-verifies, self-replaces the running binary; release binaries trimmed ~15MB→~10MB via `-ldflags="-s -w"` — shipped on `feat/update-command`, no PR yet
 - [[concepts/status-table]] — `memoria status` renders as a borderless lipgloss table instead of prose lines — shipped on `feat/status-table`, PR #5 (open, not approved), version bumped to 0.10.0
 - [[concepts/session-decay]] — `lastUsed` date stamps on `sessions/` pages: deterministic touch-on-delivery, cron-swept soft-delete (15d) / hard-delete (30d) — shipped `82490e0`, PR #10 (open, not approved), version bumped to 0.12.0
+- [[concepts/cmd-flattening]] — `cmd/memoria/` flattened into `cmd/`: pure `git mv`, path updates across build/CI/docs, README `go install` line dropped — shipped on `refactor/flatten-cmd`, PR #11 (open, CI green), version bumped to 0.12.1
 - [[research/ai-memory-workstream-comparison]] — external (chatgpt) deep-dive on ai-memory v1.19.2 that fed the `run` rework
 
 ## Decisions — why it's shaped this way
@@ -30,7 +31,7 @@ Start with [[concepts/architecture-overview]] for the pipeline end to end.
 - [[decisions/0001-plain-markdown-no-db]] — plain `.md` in the repo, versioned with the project
 - [[decisions/0002-llm-never-writes-files]] — proposal + review gate
 - [[decisions/0003-never-block-the-agent]] — LLM-driven work runs detached
-- [[decisions/0004-embedded-prompts-with-file-override]] — prompts ship in the binary (`cmd/memoria/prompts/`), a config file overrides
+- [[decisions/0004-embedded-prompts-with-file-override]] — prompts ship in the binary (`cmd/prompts/`), a config file overrides
 - [[decisions/0005-auto-apply-is-opt-in]] — autopilot off by default
 - [[decisions/0006-wiki-auto-commit-on-apply]] — applied wiki changes auto-commit when inside a git repo (default reversed by 0010)
 - [[decisions/0007-queue-safety-via-file-locking]] — file locking for queue writes, not append-only redesign
@@ -73,7 +74,7 @@ Start with [[concepts/architecture-overview]] for the pipeline end to end.
 - [[sessions/80f131bd-209e-4610-8bf3-07dac9154545]] — multi-agent init/setup shipped: `7128a3d`
 - [[sessions/019fb0a0-48d0-71f1-954f-7036553b2133]] — handoff packet dogfooded: codex resumes the claude-code session
 - [[sessions/6d290df9-cc9e-4703-bcc4-2143eba007aa]] — handoff round-trip: claude-code resumes the codex session; obsidian ignore committed (`c0ee15d`)
-- [[sessions/7facd470-c6e9-489b-b490-58832dabc6e2]] — claude session titles captured into digests and the run picker (`c2e7e3a`), plus prompts moved to `cmd/memoria/prompts/` (`c478df6`)
+- [[sessions/7facd470-c6e9-489b-b490-58832dabc6e2]] — claude session titles captured into digests and the run picker (`c2e7e3a`), plus prompts moved to `cmd/prompts/` (`c478df6`)
 - [[sessions/019fb0c0-23aa-7583-9035-ad2d71dd4ac6]] — wiki committed as `147ed73` over a packet handoff; "what did we do?" answered from the session's own page
 - [[sessions/67c500e5-dc86-4a64-8e79-a76444932b79]] — `memoria_recall` shipped (`d6edeea`): read-only "what did we do?" answers, digest rerouted
 - [[sessions/019fb0d1-0ea2-71c3-a0c2-616d5973374c]] — deferred wiki commit lands as `4d9171a` over a fourth packet handoff; recall question answered write-free
@@ -94,3 +95,4 @@ Start with [[concepts/architecture-overview]] for the pipeline end to end.
 - [[sessions/6f2b7832-1db8-4e7a-a2c0-ca0cc207e4c8]] — `memoria update` self-update command + release-binary install script shipped on `feat/update-command` (no PR yet); release binaries trimmed ~15MB→~10MB via `-ldflags="-s -w"`
 - [[sessions/de6b74fc-4caf-4133-ab00-ee307afe6d78]] — `memoria status` restyled as a lipgloss table (PR #5, unmerged, version bumped to 0.10.0); no-AI-attribution rule set after a PR body correction
 - [[sessions/acbf5d0d-d82b-4852-98fc-97cfbfb5da35]] — PR #9 closed as redundant (fix already on main via `8c0432e`); ai-memory Q&A on SQLite/FTS5/link-neighbor/decay; `lastUsed` session-page decay shipped, PR #10 (open, not approved), version bumped to 0.12.0
+- [[sessions/d67d4ba2-5135-4985-b81d-4ef7666d0232]] — `cmd/memoria/` flattened into `cmd/`, PR #11 opened with CI green, version bumped to 0.12.1
