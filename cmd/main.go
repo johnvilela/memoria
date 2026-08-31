@@ -8,7 +8,7 @@ import (
 )
 
 // version is bumped by hand on release, together with the matching git tag.
-const version = "0.12.0"
+const version = "0.12.1"
 
 func run(args []string, stdin io.Reader, out io.Writer) int {
 	arg := ""

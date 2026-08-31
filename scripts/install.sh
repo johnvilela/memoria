@@ -22,7 +22,7 @@ mkdir -p "$BIN_DIR"
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." 2>/dev/null && pwd)
 if [ -f "$repo_root/go.mod" ]; then
     command -v go >/dev/null 2>&1 || { echo "error: go is required (https://go.dev/dl)" >&2; exit 1; }
-    go build -C "$repo_root" -trimpath -o "$BIN_DIR/memoria" ./cmd/memoria
+    go build -C "$repo_root" -trimpath -o "$BIN_DIR/memoria" ./cmd
 else
     command -v sha256sum >/dev/null 2>&1 || sha256sum() { shasum -a 256 "$@"; }
     url="https://github.com/johnvilela/memoria/releases/latest/download"

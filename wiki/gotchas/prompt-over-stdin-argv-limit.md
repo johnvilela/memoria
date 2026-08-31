@@ -16,4 +16,4 @@ From commit a04b554 "fix(processor): send prompt via stdin to avoid argv size li
 - `TestRunProcessorCmdPromptNotInArgv` — prompt absent from argv even when small, so the regression can't sneak back
 - `TestRunProcessorCmdReportsStderr` — error path keeps stderr detail
 
-If you touch how `cmd/memoria/processor.go` invokes a processor (claude-code | codex | ollama | gemini), keep the prompt on stdin — an argv regression only breaks once the wiki and session backlog are big enough, which is exactly when it's hardest to notice in a quick test. Related prompt plumbing: [[decisions/0004-embedded-prompts-with-file-override]].
+If you touch how `cmd/processor.go` invokes a processor (claude-code | codex | ollama | gemini), keep the prompt on stdin — an argv regression only breaks once the wiki and session backlog are big enough, which is exactly when it's hardest to notice in a quick test. Related prompt plumbing: [[decisions/0004-embedded-prompts-with-file-override]].

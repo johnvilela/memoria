@@ -8,7 +8,7 @@ Shipped on branch `feat/update-command` (pushed, **no PR opened yet** — explic
 
 ## What it does
 
-`memoria update [-y]` (new `cmd/memoria/update.go`):
+`memoria update [-y]` (new `cmd/update.go`):
 
 1. Fetches `https://api.github.com/repos/johnvilela/memoria/releases/latest` (the URL is a package var, `latestReleaseURL`, purely so tests can point it at an `httptest` server).
 2. Compares the running `const version` against the release tag **numerically** — `parseVer` parses `x.y.z` into an int triple rather than doing a string comparison, so a dev build ahead of the last release (e.g. local `0.10.0` vs published `v0.9.0`) correctly reports "nothing to do" instead of offering a downgrade.

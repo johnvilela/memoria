@@ -143,7 +143,7 @@ The complete documented behavior is in
 | Supported native adapters | Claude and Codex | Eight harnesses |
 
 Our same-harness continuation is already comparable:
-[`run.go`](../../cmd/memoria/run.go) calls the harness's native resume command.
+[`run.go`](../../cmd/run.go) calls the harness's native resume command.
 
 The large gap begins at cross-harness continuation. memoria sends this generic
 instruction:
@@ -154,7 +154,7 @@ The receiving agent must open the file and reconstruct the work from memoria's
 shadow log. That log deliberately excludes Read, Grep, and most tools;
 Write/Edit retain primarily the path, Bash retains the command, and ordinary
 successful tool output is generally absent. See
-[`hook.go`](../../cmd/memoria/hook.go).
+[`hook.go`](../../cmd/hook.go).
 
 There is also no logical task link connecting the old Claude session, new Codex
 session, and later Claude return. They are separate sessions selected from an
@@ -210,7 +210,7 @@ subtler: it has no fast, high-quality handoff artifact.
 
 Its high-quality LLM processing can take minutes and reads the current wiki plus
 ended digests, but `memoria run` does not consume the resulting wiki page. It
-still points at the raw digest. See [`process.go`](../../cmd/memoria/process.go).
+still points at the raw digest. See [`process.go`](../../cmd/process.go).
 
 Therefore, the perceived delay is not primarily launcher latency. It is
 time-to-competence: the receiving model must reconstruct intent, decisions,

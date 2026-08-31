@@ -8,7 +8,7 @@ Before commit 6ea9c87, memoria *materialized* default prompt files into `~/.conf
 
 The trap: a machine that ran the old version still has `wiki-prompt.md` and `seed-prompt.md` sitting in the config dir from the materialize era. They now count as overrides — pinning the prompt text as of the day they were written and silently ignoring improved embedded defaults after every binary upgrade.
 
-Fix on such a machine: `diff` each copy against the embedded source (`cmd/memoria/<name>-prompt.md`) to confirm it carries no real edits, then delete it:
+Fix on such a machine: `diff` each copy against the embedded source (`cmd/<name>-prompt.md`) to confirm it carries no real edits, then delete it:
 
 ```
 rm ~/.config/memoria/wiki-prompt.md ~/.config/memoria/seed-prompt.md

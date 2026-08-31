@@ -9,7 +9,7 @@ Shipped in one session ([[sessions/e7535e5e-c210-4029-8496-3ab3c84ea9dd]]) as PR
 ## `.github/workflows/ci.yml` — runs on every PR to `main`
 
 - **`test`** job: runs `scripts/test.sh`.
-- **`version-check`** job: fails the PR if `*.go` or `go.mod` changed without a matching bump to `const version` in `cmd/memoria/main.go`, or if the tag for the new version already exists. A docs-only PR (no Go files touched) passes automatically.
+- **`version-check`** job: fails the PR if `*.go` or `go.mod` changed without a matching bump to `const version` in `cmd/main.go`, or if the tag for the new version already exists. A docs-only PR (no Go files touched) passes automatically.
 
 ## `.github/workflows/release.yml` — runs on push to `main`
 
@@ -25,7 +25,7 @@ Created via `gh api repos/johnvilela/memoria/rulesets -X POST` with a hand-built
 
 ## Version bump moved into the feature PR
 
-The version const still lives in exactly one place — `cmd/memoria/main.go` (see [[skills/release-ritual]]) — but the bump now happens as part of the PR that needs it, not as a separate manual release commit afterward. `version-check` is what enforces this; tagging and publishing are fully automatic on merge.
+The version const still lives in exactly one place — `cmd/main.go` (see [[skills/release-ritual]]) — but the bump now happens as part of the PR that needs it, not as a separate manual release commit afterward. `version-check` is what enforces this; tagging and publishing are fully automatic on merge.
 
 ## Test output: gotestsum in `testdox` format
 

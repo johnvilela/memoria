@@ -46,7 +46,7 @@ User constraints: one logical project, sessions at the parent root one at a time
 2. Best-effort git checkpoint in `buildHandoff`: map file paths from the session's `@post-tool-use` events to their owning child repos and checkpoint the distinct repos touched (capped ~3).
 3. Make the seed skip visible with a warning line.
 
-**Shipped**: commit **`31b7251`** — `feat(cmd): support multirepo parent projects with warnings and per-repo checkpoints` — landed in incarnation 2 of the assessment session ([[sessions/e112664f-9954-4d8e-8fd2-a11e13d66bc0]]), staging `cmd/memoria/bootstrap.go`, `bootstrap_test.go`, `run.go`, `run_test.go`, `seed.go`. The file set matches the three adaptations one-to-one (bootstrap warning → bootstrap.go, per-repo checkpoints → run.go, seed-skip warning → seed.go); the commit is the only trace in capture, so implementation detail beyond the commit message and file list is not recorded.
+**Shipped**: commit **`31b7251`** — `feat(cmd): support multirepo parent projects with warnings and per-repo checkpoints` — landed in incarnation 2 of the assessment session ([[sessions/e112664f-9954-4d8e-8fd2-a11e13d66bc0]]), staging `cmd/bootstrap.go`, `bootstrap_test.go`, `run.go`, `run_test.go`, `seed.go`. The file set matches the three adaptations one-to-one (bootstrap warning → bootstrap.go, per-repo checkpoints → run.go, seed-skip warning → seed.go); the commit is the only trace in capture, so implementation detail beyond the commit message and file list is not recorded.
 
 Explicitly skipped as unneeded for this workflow: the concurrency rework, per-child AGENTS.md blocks, shared-wiki config support, and the name-collision fix.
 

@@ -12,7 +12,7 @@ The consolidation contract embeds whole markdown page bodies as JSON string valu
 
 ## Mechanism
 
-`cmd/memoria/jsonout.go` is now the single parser behind all five processor call sites (`process`, `digest`, `lint` report, `lint` fix, `seed`):
+`cmd/jsonout.go` is now the single parser behind all five processor call sites (`process`, `digest`, `lint` report, `lint` fix, `seed`):
 
 ```
 extract → unmarshal ──fail──→ repairJSON() → unmarshal ──fail──→ dump raw + offset window

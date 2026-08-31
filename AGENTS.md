@@ -16,7 +16,7 @@ Differentiator vs. existing solutions: hooks + cronjobs + markdown files, human-
 
 ## Stack
 
-- Go, entrypoint in `cmd/memoria/` (no Go files in repo root); build with `go build -o memoria ./cmd/memoria`
+- Go, entrypoint in `cmd/` (no Go files in repo root); build with `go build -o memoria ./cmd`
 - CLI dispatch: stdlib `os.Args` switch — no cobra/urfave
 - TUI/styling: charmbracelet/lipgloss + bubbletea/bubbles (interactive selects and inputs live in `tui.go`)
 - Module: `github.com/johnvilela/memoria`
@@ -26,7 +26,7 @@ Differentiator vs. existing solutions: hooks + cronjobs + markdown files, human-
 - **TDD**: write tests first for every feature, confirm red, then implement to green.
 - Docs, help text, and code in English.
 - Help screen lists only real commands; planned commands are tagged "coming soon".
-- **Version bump on every code PR**: any PR touching `*.go`/`go.mod` must bump `const version` in `cmd/memoria/main.go` (CI blocks the merge otherwise; semver per `wiki/skills/release-ritual.md`). Never tag or `gh release create` by hand — merging to main tags `v<version>` and publishes the release automatically.
+- **Version bump on every code PR**: any PR touching `*.go`/`go.mod` must bump `const version` in `cmd/main.go` (CI blocks the merge otherwise; semver per `wiki/skills/release-ritual.md`). Never tag or `gh release create` by hand — merging to main tags `v<version>` and publishes the release automatically.
 - Main is protected: no direct pushes — branch, PR, green checks, merge.
 
 ## Scripts

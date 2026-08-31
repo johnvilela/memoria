@@ -1,5 +1,6 @@
 ---
 tags: [session, run, cli, tui]
+lastUsed: 2026-08-31
 ---
 
 # Session: `run` rework — drop `--last-session`, pick from recent sessions
