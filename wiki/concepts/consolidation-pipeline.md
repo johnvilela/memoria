@@ -10,7 +10,7 @@ The configured processor receives the ended sessions plus the current wiki and r
 
 Flags (commit 5c50d83): `--inspect` follows a running job, `--all` sweeps every project (the timer's entrypoint), `--foreground` opts out of detaching.
 
-**Lint** (commit c5fb59b): `memoria lint` audits the wiki for contradictions / stale / duplicate pages in the background; `--review` prints the findings, `--apply` fixes them via a second LLM pass, `--deny "why"` rejects them with a reason future runs remember. Prompt: `cmd/memoria/lint-prompt.md`.
+**Lint** (commit c5fb59b): `memoria lint` audits the wiki for contradictions / stale / duplicate pages in the background; `--review` prints the findings, `--apply` fixes them via a second LLM pass, `--deny "why"` rejects them with a reason future runs remember. Prompt: `cmd/prompts/lint-prompt.md`.
 
 **Cron** (commit 5c50d83, README §Cron): `--cron` installs a systemd user timer running `process --all` on a schedule (`hourly`, `every 3 hours`, `8 times a day`, or 5-field cron); `--cron-apply` makes the timer apply proposals without review. `memoria setup` reconfigures processor / notifications / auto-apply / schedule without touching hooks.
 

@@ -11,10 +11,10 @@ if [ "${1:-}" = "all" ]; then
         os=${target%/*} arch=${target#*/}
         out="dist/memoria_${os}_${arch}"
         # -s -w strips symbol table + DWARF (~1/3 smaller); panic traces keep names via pclntab
-        GOOS=$os GOARCH=$arch CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o "$out" ./cmd/memoria
+        GOOS=$os GOARCH=$arch CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o "$out" ./cmd
         echo "built $out"
     done
 else
-    go build -trimpath -o memoria ./cmd/memoria
+    go build -trimpath -o memoria ./cmd
     echo "built ./memoria"
 fi

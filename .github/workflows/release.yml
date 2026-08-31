@@ -29,7 +29,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          version=$(sed -n 's/^const version = "\(.*\)"$/\1/p' cmd/memoria/main.go)
+          version=$(sed -n 's/^const version = "\(.*\)"$/\1/p' cmd/main.go)
           if git ls-remote --exit-code --tags origin "refs/tags/v$version" >/dev/null; then
             echo "tag v$version already exists — nothing to release"
             exit 0

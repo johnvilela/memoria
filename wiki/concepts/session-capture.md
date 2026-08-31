@@ -14,4 +14,4 @@ tags: [hooks, digests, sessions, titles, queue]
 
 **Incarnations**: reopening an already-processed session starts a numbered incarnation (`<sid>-2.md`) linked to the archived one via `continues_from` frontmatter (commit 3275e45, README §How it works). A plain resume of a still-pending session keeps appending to the same digest file — the [[sessions/7facd470-c6e9-489b-b490-58832dabc6e2]] digest holds an end and a `source: resume` start back-to-back.
 
-The internal command `memoria digest <sid>` compiles one session's observation log into a clean `sessions/<sid>.md` wiki page, driven by the per-session prompt `cmd/memoria/prompts/digest-prompt.md` ([[decisions/0004-embedded-prompts-with-file-override]]).
+The internal command `memoria digest <sid>` compiles one session's observation log into a clean `sessions/<sid>.md` wiki page, driven by the per-session prompt `cmd/prompts/digest-prompt.md` ([[decisions/0004-embedded-prompts-with-file-override]]).

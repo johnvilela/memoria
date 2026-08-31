@@ -27,11 +27,11 @@ jobs:
             exit 0
           fi
           extract() { sed -n 's/^const version = "\(.*\)"$/\1/p' "$1"; }
-          head_version=$(extract cmd/memoria/main.go)
-          base_version=$(git show "origin/${{ github.base_ref }}:cmd/memoria/main.go" | extract /dev/stdin)
+          head_version=$(extract cmd/main.go)
+          base_version=$(git show "origin/${{ github.base_ref }}:cmd/main.go" | extract /dev/stdin)
           echo "base=$base_version head=$head_version"
           if [ "$head_version" = "$base_version" ]; then
-            echo "::error::Go code changed but const version in cmd/memoria/main.go was not bumped"
+            echo "::error::Go code changed but const version in cmd/main.go was not bumped"
             exit 1
           fi
           if git ls-remote --exit-code --tags origin "refs/tags/v$head_version" >/dev/null; then
