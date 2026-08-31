@@ -11,7 +11,7 @@ Start with [[concepts/architecture-overview]] for the pipeline end to end.
 - [[concepts/consolidation-pipeline]] — `process`, JSON proposal, lint, cron timer
 - [[concepts/mcp-server]] — the seven MCP tools agents get; `memoria_recall` is the read-only recall path
 - [[concepts/init-setup-multi-agent]] — multi-agent hook/MCP install, the `clients:` registry in config
-- [[concepts/recall-and-run]] — bootstrap, AGENTS.md recall block, `run`'s session picker + cross-harness handoff packet (ask-first since `6414c80`), `search`
+- [[concepts/recall-and-run]] — bootstrap, AGENTS.md recall block, `run`'s session picker + cross-harness handoff packet (ask-first since `6414c80`), `search` (global-aware + headless as of PR #7, targeting v0.10.2)
 - [[concepts/multirepo-parent-project]] — how memoria behaves on a multirepo parent folder; the eparts verdict — adaptations shipped as `31b7251`
 - [[concepts/global-capture-mode]] — `bootstrap --global`/`--global-path` and `setup --global`: capture sessions in unregistered folders into a `_global` pseudo-project — shipped `8e495d5`
 - [[concepts/handoff-vs-ai-memory]] — research: ai-memory's deterministic workstream handoff vs memoria's — spawned the packet handoff (`ad5d206`)
@@ -91,3 +91,4 @@ Start with [[concepts/architecture-overview]] for the pipeline end to end.
 - [[sessions/e7535e5e-c210-4029-8496-3ab3c84ea9dd]] — release pipeline shipped: v0.8.0 (CI/CD + branch protection) and v0.8.1 (vitest-style test output)
 - [[sessions/6f2b7832-1db8-4e7a-a2c0-ca0cc207e4c8]] — `memoria update` self-update command + release-binary install script shipped on `feat/update-command` (no PR yet); release binaries trimmed ~15MB→~10MB via `-ldflags="-s -w"`
 - [[sessions/de6b74fc-4caf-4133-ab00-ee307afe6d78]] — `memoria status` restyled as a lipgloss table (PR #5, unmerged, version bumped to 0.10.0); no-AI-attribution rule set after a PR body correction
+- [[sessions/8c5b6cfe-3ae7-4399-b658-43f76ee8bdbe]] — `memoria search` made global-aware and headless (PR #7, open, CI green, unmerged), closing a gap the earlier MCP/digest global-mode fix left in the CLI; version bumped to 0.10.2
