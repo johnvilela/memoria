@@ -95,6 +95,8 @@ func mcpSearch(cwd, configPath, query string, includeTrash bool) (mcpSearchOut, 
 		m := pageHit{Path: h}
 		if len(hits) <= 3 {
 			m.Content = wiki[h]
+			// inlined content counts as usage; path-only listings don't
+			touchLastUsed(wikiRoot, h)
 		}
 		out.Matches = append(out.Matches, m)
 	}
@@ -158,6 +160,7 @@ func mcpRecall(cwd, configPath, sessionID string) (mcpRecallOut, error) {
 	if err != nil {
 		return mcpRecallOut{}, err
 	}
+	touchLastUsed(wikiRoot, "sessions/"+sid+".md")
 	return mcpRecallOut{SessionID: sid, Content: buildHandoff(proj, wikiRoot, sid, digest, false)}, nil
 }
 
@@ -180,6 +183,8 @@ func mcpDigest(cwd, configPath, sessionID string) (mcpJobOut, error) {
 		if err != nil {
 			return mcpJobOut{}, false
 		}
+		// the agent receives the page — that's usage, not just a rewrite
+		touchLastUsed(wikiRoot, rel)
 		return mcpJobOut{State: "done", Page: rel, Content: string(b)}, true
 	}
 	return mcpJob(cwd, configPath, projName, ready, "digest", sid, "--foreground")
@@ -270,14 +275,10 @@ func mcpWritePage(cwd, configPath string, in mcpWritePageIn) (mcpWriteOut, error
 	if valid, dropped := validatePages([]wikiPage{page}, wikiRoot, projName == globalName); len(valid) == 0 {
 		return mcpWriteOut{}, errors.New(dropped[0])
 	}
-	dst := filepath.Join(wikiRoot, filepath.FromSlash(in.Path))
-	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+	if err := writeWikiPage(wikiRoot, in.Path, in.Tags, in.BodyMarkdown); err != nil {
 		return mcpWriteOut{}, err
 	}
-	if err := os.WriteFile(dst, []byte(renderPage(in.Tags, in.BodyMarkdown)), 0o644); err != nil {
-		return mcpWriteOut{}, err
-	}
-	logf("mcp", "wrote %s", dst)
+	logf("mcp", "wrote %s", filepath.Join(wikiRoot, filepath.FromSlash(in.Path)))
 	return mcpWriteOut{Path: in.Path, Written: true}, nil
 }
 
@@ -333,27 +334,7 @@ func addDeletedTag(content string) string {
 	if !slices.Contains(tags, "deleted") {
 		tags = append(tags, "deleted")
 	}
-	line := "tags: [" + strings.Join(tags, ", ") + "]"
-	rest, ok := strings.CutPrefix(content, "---\n")
-	if !ok {
-		return "---\n" + line + "\n---\n\n" + content
-	}
-	end := strings.Index(rest, "\n---")
-	if end < 0 {
-		return "---\n" + line + "\n---\n\n" + content
-	}
-	var lines []string
-	replaced := false
-	for _, l := range strings.Split(rest[:end], "\n") {
-		if strings.HasPrefix(l, "tags:") {
-			l, replaced = line, true
-		}
-		lines = append(lines, l)
-	}
-	if !replaced {
-		lines = append(lines, line)
-	}
-	return "---\n" + strings.Join(lines, "\n") + rest[end:]
+	return upsertFrontLine(content, "tags", "tags: ["+strings.Join(tags, ", ")+"]")
 }
 
 // runMCP serves the memoria tools over stdio. stdout belongs to the protocol:
@@ -367,7 +348,7 @@ func runMCP(configPath string, out io.Writer) int {
 		IncludeTrash bool   `json:"include_trash,omitempty" jsonschema:"also search deleted pages under trash/"`
 	}
 	mcp.AddTool(srv, &mcp.Tool{Name: "memoria_search",
-		Description: "Search this project's memory wiki by text or #tag. Trashed (deleted) pages are excluded unless include_trash is set."},
+		Description: "Search this project's memory wiki by text or #tag. Trashed (deleted) pages are excluded unless include_trash is set. Reading a page counts as using it: unused sessions/ pages decay to trash/ over time, and results whose content is returned stay alive."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in searchIn) (*mcp.CallToolResult, mcpSearchOut, error) {
 			d, err := cwd()
 			if err != nil {
@@ -381,7 +362,7 @@ func runMCP(configPath string, out io.Writer) int {
 		SessionID string `json:"session_id,omitempty" jsonschema:"session to recall; defaults to the most recent session (usually the caller's own)"`
 	}
 	mcp.AddTool(srv, &mcp.Tool{Name: "memoria_recall",
-		Description: "Read-only: return a past session's full record — git checkpoint, event log, last state, wiki summary if one exists. Use this to answer questions like \"what did we do in this session?\". No LLM call, nothing is written."},
+		Description: "Read-only: return a past session's full record — git checkpoint, event log, last state, wiki summary if one exists. Use this to answer questions like \"what did we do in this session?\". No LLM call, nothing is written (recalling refreshes the session page's lastUsed date so it doesn't decay)."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in recallIn) (*mcp.CallToolResult, mcpRecallOut, error) {
 			d, err := cwd()
 			if err != nil {
@@ -432,7 +413,7 @@ func runMCP(configPath string, out io.Writer) int {
 		})
 
 	mcp.AddTool(srv, &mcp.Tool{Name: "memoria_write_page",
-		Description: "Create or update a wiki page. memoria renders the tags frontmatter; send only the markdown body."},
+		Description: "Create or update a wiki page. memoria renders the tags (and, for sessions/ pages, lastUsed) frontmatter; send only the markdown body."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in mcpWritePageIn) (*mcp.CallToolResult, mcpWriteOut, error) {
 			d, err := cwd()
 			if err != nil {
@@ -446,7 +427,7 @@ func runMCP(configPath string, out io.Writer) int {
 		Path string `json:"path" jsonschema:"wiki-relative path of the page to move to trash/"`
 	}
 	mcp.AddTool(srv, &mcp.Tool{Name: "memoria_delete_page",
-		Description: "Move a wiki page to trash/. The page gets a 'deleted' tag and disappears from search unless include_trash is used; wikilinks to it may remain."},
+		Description: "Move a wiki page to trash/. The page gets a 'deleted' tag and disappears from search unless include_trash is used; wikilinks to it may remain. Trashed sessions/ pages are purged permanently after the decay window."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in deleteIn) (*mcp.CallToolResult, mcpDeleteOut, error) {
 			d, err := cwd()
 			if err != nil {

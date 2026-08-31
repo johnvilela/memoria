@@ -227,6 +227,10 @@ memoria_write_page, memoria_delete_page.
 To recall what a past session did, call memoria_recall (read-only).
 memoria_digest WRITES the session's wiki page — only when the user
 asks to save the session.
+Session pages (sessions/) decay: unused ones move to trash/ after
+~15 days and are purged after ~30 (configurable). Reading a page via
+search or recall keeps it alive. The lastUsed frontmatter line is
+memoria's — never write or edit it.
 <!-- memoria:end -->`
 
 // writeAgentsFiles puts the recall instructions into <proj>/AGENTS.md —

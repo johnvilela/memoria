@@ -26,6 +26,7 @@ func digestFixture(t *testing.T) (proj, cfgPath string) {
 
 func TestDigestForeground(t *testing.T) {
 	proj, cfgPath := digestFixture(t)
+	stubNow(t, "2026-08-31")
 	prompt := stubProcessor(t, `{"title":"Queue work","body_markdown":"did queue work\n","tags":["queue"]}`, nil)
 	var buf bytes.Buffer
 	if code := runDigest(proj, cfgPath, []string{"s1", "--foreground"}, &buf); code != 0 {
@@ -35,7 +36,7 @@ func TestDigestForeground(t *testing.T) {
 	if err != nil {
 		t.Fatalf("session page not written: %v", err)
 	}
-	want := "---\ntags: [queue]\n---\n\n# Queue work\n\ndid queue work\n"
+	want := "---\ntags: [queue]\nlastUsed: 2026-08-31\n---\n\n# Queue work\n\ndid queue work\n"
 	if string(b) != want {
 		t.Fatalf("page = %q, want %q", b, want)
 	}
@@ -59,6 +60,7 @@ func TestDigestForegroundIncludesCurrentPage(t *testing.T) {
 	if err := os.WriteFile(page, []byte("old heuristic page\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	stubNow(t, "2026-08-31")
 	prompt := stubProcessor(t, `{"title":"T","body_markdown":"# T\n\nnew\n","tags":[]}`, nil)
 	var buf bytes.Buffer
 	if code := runDigest(proj, cfgPath, []string{"s1", "--foreground"}, &buf); code != 0 {
@@ -69,8 +71,29 @@ func TestDigestForegroundIncludesCurrentPage(t *testing.T) {
 	}
 	// body already starts with a heading — no second title prepended
 	b, _ := os.ReadFile(page)
-	if string(b) != "# T\n\nnew\n" {
+	if string(b) != "---\nlastUsed: 2026-08-31\n---\n\n# T\n\nnew\n" {
 		t.Fatalf("page = %q", b)
+	}
+}
+
+func TestDigestPreservesLastUsed(t *testing.T) {
+	proj, cfgPath := digestFixture(t)
+	stubNow(t, "2026-08-31")
+	page := filepath.Join(proj, "wiki", "sessions", "s1.md")
+	if err := os.MkdirAll(filepath.Dir(page), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(page, []byte("---\ntags: [queue]\nlastUsed: 2026-07-01\n---\n\nold\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stubProcessor(t, `{"title":"T","body_markdown":"# T\n\nnew\n","tags":["queue"]}`, nil)
+	var buf bytes.Buffer
+	if code := runDigest(proj, cfgPath, []string{"s1", "--foreground"}, &buf); code != 0 {
+		t.Fatalf("digest = %d: %s", code, buf.String())
+	}
+	b, _ := os.ReadFile(page)
+	if !strings.Contains(string(b), "lastUsed: 2026-07-01") || strings.Contains(string(b), "2026-08-31") {
+		t.Fatalf("LLM rewrite must preserve the deterministic date: %q", b)
 	}
 }
 
