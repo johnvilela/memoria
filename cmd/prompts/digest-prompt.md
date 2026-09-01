@@ -44,6 +44,9 @@ history only when useful, but must not be presented as current fact.
 7. Length follows the observations: as long as they warrant,
    no longer. Don't pad with generic tutorial filler, but
    don't truncate substance either.
+8. Write for the future agent that resumes this work: lead with
+   the current state, what's left, and what to watch out for —
+   all drawn from the observations.
 
 ## WIKILINKS — connect pages into the graph
 

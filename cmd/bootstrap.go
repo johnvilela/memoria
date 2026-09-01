@@ -217,20 +217,27 @@ func applyGlobalSetting(enable, enableSet bool, path string, pathSet bool, confi
 const memoriaBlockTmpl = `<!-- memoria:start -->
 ## Project memory (memoria)
 
-Curated long-term memory from past agent sessions lives in ` + "`%s/`" + `:
-decisions made, rules to follow, gotchas hit, concepts explained.
-Before non-trivial changes: read ` + "`%s/index.md`" + `, then grep ` + "`%s/`" + `
-for keywords. Pages carry YAML ` + "`tags:`" + ` frontmatter for topic lookup.
-Prefer the memoria MCP tools when available: memoria_search,
-memoria_recall, memoria_digest, memoria_consolidate, memoria_lint,
-memoria_write_page, memoria_delete_page.
-To recall what a past session did, call memoria_recall (read-only).
-memoria_digest WRITES the session's wiki page — only when the user
-asks to save the session.
-Session pages (sessions/) decay: unused ones move to trash/ after
-~15 days and are purged after ~30 (configurable). Reading a page via
-search or recall keeps it alive. The lastUsed frontmatter line is
-memoria's — never write or edit it.
+` + "`%s/`" + ` is this project's long-term memory: decisions, rules,
+gotchas and concepts distilled from past agent sessions. Treat its
+pages as project ground truth — they record what actually happened
+here, so trust them over guesses about the codebase. If the code
+contradicts a page, the code won — update the page (memoria_write_page).
+
+Before any non-trivial task, call memoria_search for the topic (no
+MCP? read ` + "`%s/index.md`" + `, then grep ` + "`%s/`" + ` — pages carry YAML
+` + "`tags:`" + ` frontmatter). Prefix queries with @<project> or @all to
+search other registered projects. Resuming or asked about earlier
+work? memoria_recall returns that session's full context (read-only).
+
+When you discover something durable — a decision taken, a gotcha
+hit, a rule agreed — save it immediately with memoria_write_page;
+pages outside sessions/ never expire. memoria_digest WRITES the
+session's wiki page: use it only when the user asks to save.
+
+Session pages (sessions/) decay when unused: trashed after ~15 days,
+purged after ~30 (configurable). Reading them via search or recall
+keeps them alive. The lastUsed frontmatter line is memoria's — never
+write or edit it.
 <!-- memoria:end -->`
 
 // writeAgentsFiles puts the recall instructions into <proj>/AGENTS.md —

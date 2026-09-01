@@ -39,6 +39,9 @@ don't paper over it.
 - Cite the source briefly inside the body (e.g. 'From commit
   abc1234:' or 'README §Quick start says...') so future readers
   can audit.
+- Write for an agent audience: imperative and actionable. Future
+  agents treat these pages as ground truth on day one — state
+  grounded facts plainly and flag uncertainty explicitly.
 - Write each page at whatever length the sources actually
   warrant. Don't pad with generic tutorial filler — sections
   like "Best practices" / "Examples" / "Patterns" are

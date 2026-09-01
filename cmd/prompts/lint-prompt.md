@@ -31,6 +31,8 @@ outcome — they prove the wiki is internally consistent.
 - 0-N findings per call. Most calls find 0-2.
 - Each finding cites the conflicting page paths verbatim from
   the input.
+- When one page is clearly the authoritative/current one, name it
+  in the message — the fix may be applied by an agent.
 - kind:
   - `contradiction` — clear factual disagreement
   - `stale` — one page supersedes another

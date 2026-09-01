@@ -14,7 +14,14 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
+// mcpInstructions is surfaced to the client at initialize — the why/when
+// pitch; per-tool contracts live in the tool descriptions.
+const mcpInstructions = `memoria is this project's long-term memory: a curated wiki of decisions, rules, gotchas and concepts distilled from past agent sessions. Its pages are project ground truth — every claim is grounded in what actually happened here, so trust them over guesses about the codebase; if the code contradicts a page, the code has moved on — update the page.
+
+Workflow: call memoria_search before starting non-trivial work (prefix @<project> or @all to reach sibling projects); call memoria_recall to resume or explain earlier sessions; and when you discover something durable mid-session — a decision, a gotcha, a rule — save it immediately with memoria_write_page. Unsaved findings die with the session.`
+
 type pageHit struct {
+	Project string `json:"project"`
 	Path    string `json:"path"`
 	Content string `json:"content,omitempty"`
 }
@@ -40,9 +47,9 @@ type mcpJobOut struct {
 }
 
 type mcpWritePageIn struct {
-	Path         string   `json:"path" jsonschema:"wiki-relative path ending in .md: index.md, under the suggested concepts/, decisions/, gotchas/, rules/ or sessions/, or under an existing top-level wiki folder; trash/, _global/ and dot-folders are reserved"`
+	Path         string   `json:"path" jsonschema:"wiki-relative path ending in .md: index.md, under the suggested concepts/, decisions/, gotchas/, rules/ or sessions/, or under an existing top-level wiki folder; prefer non-sessions folders for durable knowledge (sessions/ decays); trash/, _global/ and dot-folders are reserved"`
 	Title        string   `json:"title" jsonschema:"short page title"`
-	BodyMarkdown string   `json:"body_markdown" jsonschema:"markdown body without frontmatter"`
+	BodyMarkdown string   `json:"body_markdown" jsonschema:"markdown body without frontmatter; replaces the whole page — include [[wikilinks]] to related pages"`
 	Tags         []string `json:"tags,omitempty" jsonschema:"0-5 short kebab-case tags"`
 }
 
@@ -81,22 +88,22 @@ func resolveWorkspace(cwd, configPath string) (cfg config, proj, projName, wikiR
 }
 
 func mcpSearch(cwd, configPath, query string, includeTrash bool) (mcpSearchOut, error) {
-	if strings.TrimSpace(query) == "" {
+	sels, q := splitSelectors(strings.TrimSpace(query))
+	if q == "" {
 		return mcpSearchOut{}, fmt.Errorf("empty query")
 	}
-	_, _, _, wikiRoot, err := resolveWorkspace(cwd, configPath)
+	wss, err := searchWorkspaces(cwd, configPath, sels)
 	if err != nil {
 		return mcpSearchOut{}, err
 	}
-	wiki := readWikiTrash(wikiRoot, includeTrash)
-	hits := searchWiki(wiki, query)
+	hits := searchHits(wss, q, includeTrash)
 	out := mcpSearchOut{Matches: []pageHit{}}
 	for _, h := range hits {
-		m := pageHit{Path: h}
+		m := pageHit{Project: h.project, Path: h.path}
 		if len(hits) <= 3 {
-			m.Content = wiki[h]
+			m.Content = h.content
 			// inlined content counts as usage; path-only listings don't
-			touchLastUsed(wikiRoot, h)
+			touchLastUsed(h.wikiRoot, h.path)
 		}
 		out.Matches = append(out.Matches, m)
 	}
@@ -233,7 +240,7 @@ func mcpConsolidate(cwd, configPath string, apply bool) (mcpJobOut, error) {
 func proposalPages(proposalPath string) ([]string, error) {
 	b, err := os.ReadFile(proposalPath)
 	if err != nil {
-		return nil, fmt.Errorf("no proposal ready — run memoria_consolidate first")
+		return nil, fmt.Errorf("no proposal ready — call memoria_consolidate without apply first")
 	}
 	var prop proposal
 	if err := json.Unmarshal(b, &prop); err != nil {
@@ -255,7 +262,7 @@ func mcpLint(cwd, configPath string) (mcpJobOut, error) {
 	ready := func(s procStatus) (mcpJobOut, bool) {
 		if findings, err := readFindings(lintPath); err == nil {
 			return mcpJobOut{State: "done", Findings: findings,
-				Detail: "review with memoria lint --review, fix with --apply or reject with --deny"}, true
+				Detail: "no MCP apply — fix cited pages with memoria_write_page/memoria_delete_page, or the user runs memoria lint --apply / --deny"}, true
 		}
 		// no report file: only a finished clean run counts as done
 		if s.State == "done" && strings.Contains(s.Detail, "lint") {
@@ -340,15 +347,16 @@ func addDeletedTag(content string) string {
 // runMCP serves the memoria tools over stdio. stdout belongs to the protocol:
 // diagnostics go to the file log only.
 func runMCP(configPath string, out io.Writer) int {
-	srv := mcp.NewServer(&mcp.Implementation{Name: "memoria", Version: version}, nil)
+	srv := mcp.NewServer(&mcp.Implementation{Name: "memoria", Version: version},
+		&mcp.ServerOptions{Instructions: mcpInstructions})
 	cwd := func() (string, error) { return os.Getwd() }
 
 	type searchIn struct {
-		Query        string `json:"query" jsonschema:"text substring or #tag to find wiki pages"`
+		Query        string `json:"query" jsonschema:"text substring or #tag to find wiki pages; lead with @project tokens or @all to search other/all registered projects (e.g. '@api queue' or '@all engine')"`
 		IncludeTrash bool   `json:"include_trash,omitempty" jsonschema:"also search deleted pages under trash/"`
 	}
 	mcp.AddTool(srv, &mcp.Tool{Name: "memoria_search",
-		Description: "Search this project's memory wiki by text or #tag. Trashed (deleted) pages are excluded unless include_trash is set. Reading a page counts as using it: unused sessions/ pages decay to trash/ over time, and results whose content is returned stay alive."},
+		Description: "Search the project's memory wiki — decisions, rules, gotchas and concepts from past sessions. Call this before starting non-trivial work: pages record gotchas and decisions the code alone won't show, and matches are project ground truth. Query by text substring or #tag; lead with @<project-name> tokens (repeatable) or @all to search other/all registered projects (an unknown name errors listing the known ones); from an unregistered folder the global wiki is searched when global mode is on. Page content is inlined only when there are ≤3 hits — more hits return paths only, so narrow the query and search again (only inlined reads refresh a sessions/ page's lastUsed and keep it from decaying). Pages reference each other with [[wikilinks]] — follow relevant links with further searches. Trashed pages are excluded unless include_trash is set (hits come back keyed trash/<orig-path>)."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in searchIn) (*mcp.CallToolResult, mcpSearchOut, error) {
 			d, err := cwd()
 			if err != nil {
@@ -362,7 +370,7 @@ func runMCP(configPath string, out io.Writer) int {
 		SessionID string `json:"session_id,omitempty" jsonschema:"session to recall; defaults to the most recent session (usually the caller's own)"`
 	}
 	mcp.AddTool(srv, &mcp.Tool{Name: "memoria_recall",
-		Description: "Read-only: return a past session's full record — git checkpoint, event log, last state, wiki summary if one exists. Use this to answer questions like \"what did we do in this session?\". No LLM call, nothing is written (recalling refreshes the session page's lastUsed date so it doesn't decay)."},
+		Description: "Resume context from a past session: returns a self-contained handoff packet — git checkpoint, event history following the continues_from chain, and the session's wiki page when one exists. Call it at session start when continuing earlier work, or to answer \"what did we do in that session?\". Read-only, no LLM call; session_id defaults to the most recent session (usually the caller's own), and recalling refreshes the session page's lastUsed so it doesn't decay. If it errors (no sessions or no digest), fall back to memoria_search."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in recallIn) (*mcp.CallToolResult, mcpRecallOut, error) {
 			d, err := cwd()
 			if err != nil {
@@ -376,7 +384,7 @@ func runMCP(configPath string, out io.Writer) int {
 		SessionID string `json:"session_id,omitempty" jsonschema:"session to compile; defaults to the most recent session"`
 	}
 	mcp.AddTool(srv, &mcp.Tool{Name: "memoria_digest",
-		Description: "WRITES the wiki page sessions/<id>.md (overwriting any existing one) by compiling the session's observation log with an LLM. Use only when the user wants the session saved to the wiki — to recall what happened, use memoria_recall or memoria_search instead. Background job: first call starts it, call again to poll until state=done."},
+		Description: "WRITES the wiki page sessions/<id>.md (overwriting any existing one, preserving lastUsed) by compiling the session's observation log with an LLM. Use it when the user wants the session saved, or to hand work-in-progress to a future session — to merely read past work, use memoria_recall or memoria_search instead. Background job: the first call returns state=started; poll until state=done, which returns the full page content inline. A failed run reports the previous error in detail and auto-retries on the next poll."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in digestIn) (*mcp.CallToolResult, mcpJobOut, error) {
 			d, err := cwd()
 			if err != nil {
@@ -390,7 +398,7 @@ func runMCP(configPath string, out io.Writer) int {
 		Apply bool `json:"apply,omitempty" jsonschema:"write the ready proposal's pages to the wiki"`
 	}
 	mcp.AddTool(srv, &mcp.Tool{Name: "memoria_consolidate",
-		Description: "Consolidate ended sessions into durable wiki pages. Background LLM job: poll until state=done, review the proposed pages, then call again with apply=true to write them."},
+		Description: "Distill ended sessions into durable wiki pages (concepts, decisions, gotchas, rules). Background LLM job: the first call starts it; poll until state=done, which lists the proposed page paths (paths only — read the pages to review), then call again with apply=true to write them; apply also archives the consumed sessions and may auto-commit the wiki. state=idle means no ended sessions to consolidate — success, not an error. apply=true without a ready proposal errors; when auto_apply is configured the run applies itself and done reports \"applied …\"."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in consolidateIn) (*mcp.CallToolResult, mcpJobOut, error) {
 			d, err := cwd()
 			if err != nil {
@@ -402,7 +410,7 @@ func runMCP(configPath string, out io.Writer) int {
 
 	type lintIn struct{}
 	mcp.AddTool(srv, &mcp.Tool{Name: "memoria_lint",
-		Description: "Audit the wiki for contradictions, stale or duplicate pages. Background LLM job: first call starts it, call again to poll the findings."},
+		Description: "Audit the wiki for internal consistency: findings have kind contradiction|stale|duplicate and severity warning|info. Background LLM job: the first call starts it, call again to poll. Empty findings on done means the wiki is healthy — a valid, useful result. There is no MCP apply: fix cited pages yourself with memoria_write_page / memoria_delete_page, or the user runs memoria lint --apply / --deny."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in lintIn) (*mcp.CallToolResult, mcpJobOut, error) {
 			d, err := cwd()
 			if err != nil {
@@ -413,7 +421,7 @@ func runMCP(configPath string, out io.Writer) int {
 		})
 
 	mcp.AddTool(srv, &mcp.Tool{Name: "memoria_write_page",
-		Description: "Create or update a wiki page. memoria renders the tags (and, for sessions/ pages, lastUsed) frontmatter; send only the markdown body."},
+		Description: "Save durable knowledge to the wiki the moment you discover it — a decision made, a gotcha hit, a rule agreed, a concept clarified. Don't wait for session end: pages outside sessions/ never decay, and unsaved findings are lost. Full replace, not a patch: the body you send becomes the whole page, so carry forward still-valid content when updating. Reference related pages inline with [[wikilinks]] (e.g. [[decisions/0001-slug]]) so the page joins the graph instead of becoming an orphan island; invented top-level folders are rejected with the reason. memoria renders the tags (and, for sessions/ pages, lastUsed) frontmatter — send only the markdown body."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in mcpWritePageIn) (*mcp.CallToolResult, mcpWriteOut, error) {
 			d, err := cwd()
 			if err != nil {
@@ -427,7 +435,7 @@ func runMCP(configPath string, out io.Writer) int {
 		Path string `json:"path" jsonschema:"wiki-relative path of the page to move to trash/"`
 	}
 	mcp.AddTool(srv, &mcp.Tool{Name: "memoria_delete_page",
-		Description: "Move a wiki page to trash/. The page gets a 'deleted' tag and disappears from search unless include_trash is used; wikilinks to it may remain. Trashed sessions/ pages are purged permanently after the decay window."},
+		Description: "Move a wiki page to trash/<orig-path> (a -N suffix avoids collisions); it gets a 'deleted' tag and vanishes from search unless include_trash is set. Recoverable: durable pages sit in trash/ indefinitely; only trashed sessions/ pages are purged for good after the decay window. Wikilinks pointing at the page may remain."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in deleteIn) (*mcp.CallToolResult, mcpDeleteOut, error) {
 			d, err := cwd()
 			if err != nil {
