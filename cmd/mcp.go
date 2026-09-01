@@ -15,6 +15,7 @@ import (
 )
 
 type pageHit struct {
+	Project string `json:"project"`
 	Path    string `json:"path"`
 	Content string `json:"content,omitempty"`
 }
@@ -81,22 +82,22 @@ func resolveWorkspace(cwd, configPath string) (cfg config, proj, projName, wikiR
 }
 
 func mcpSearch(cwd, configPath, query string, includeTrash bool) (mcpSearchOut, error) {
-	if strings.TrimSpace(query) == "" {
+	sels, q := splitSelectors(strings.TrimSpace(query))
+	if q == "" {
 		return mcpSearchOut{}, fmt.Errorf("empty query")
 	}
-	_, _, _, wikiRoot, err := resolveWorkspace(cwd, configPath)
+	wss, err := searchWorkspaces(cwd, configPath, sels)
 	if err != nil {
 		return mcpSearchOut{}, err
 	}
-	wiki := readWikiTrash(wikiRoot, includeTrash)
-	hits := searchWiki(wiki, query)
+	hits := searchHits(wss, q, includeTrash)
 	out := mcpSearchOut{Matches: []pageHit{}}
 	for _, h := range hits {
-		m := pageHit{Path: h}
+		m := pageHit{Project: h.project, Path: h.path}
 		if len(hits) <= 3 {
-			m.Content = wiki[h]
+			m.Content = h.content
 			// inlined content counts as usage; path-only listings don't
-			touchLastUsed(wikiRoot, h)
+			touchLastUsed(h.wikiRoot, h.path)
 		}
 		out.Matches = append(out.Matches, m)
 	}
@@ -344,11 +345,11 @@ func runMCP(configPath string, out io.Writer) int {
 	cwd := func() (string, error) { return os.Getwd() }
 
 	type searchIn struct {
-		Query        string `json:"query" jsonschema:"text substring or #tag to find wiki pages"`
+		Query        string `json:"query" jsonschema:"text substring or #tag to find wiki pages; lead with @project tokens or @all to search other/all registered projects (e.g. '@api queue' or '@all engine')"`
 		IncludeTrash bool   `json:"include_trash,omitempty" jsonschema:"also search deleted pages under trash/"`
 	}
 	mcp.AddTool(srv, &mcp.Tool{Name: "memoria_search",
-		Description: "Search this project's memory wiki by text or #tag. Trashed (deleted) pages are excluded unless include_trash is set. Reading a page counts as using it: unused sessions/ pages decay to trash/ over time, and results whose content is returned stay alive."},
+		Description: "Search this project's memory wiki by text or #tag. Lead the query with @<project-name> tokens (repeatable) or @all to search other/all registered projects instead — an unknown name errors listing the known ones. Results are ranked by occurrence count and tagged with their project. Trashed (deleted) pages are excluded unless include_trash is set. Reading a page counts as using it: unused sessions/ pages decay to trash/ over time, and results whose content is returned stay alive."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in searchIn) (*mcp.CallToolResult, mcpSearchOut, error) {
 			d, err := cwd()
 			if err != nil {

@@ -66,6 +66,30 @@ func TestMCPSearch(t *testing.T) {
 	}
 }
 
+func TestMCPSearchCrossProject(t *testing.T) {
+	alpha, _, cfgPath := crossFixture(t)
+	res, err := mcpSearch(alpha, cfgPath, "@all engine", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Matches) != 2 ||
+		res.Matches[0].Project != "alpha" || res.Matches[0].Path != "concepts/engine.md" ||
+		res.Matches[1].Project != "beta" || res.Matches[1].Path != "notes/motor.md" {
+		t.Fatalf("@all matches = %+v, want alpha then beta ranked by score", res.Matches)
+	}
+	for _, m := range res.Matches {
+		if m.Content == "" {
+			t.Fatalf("content should inline on <=3 hits: %+v", m)
+		}
+	}
+	if _, err := mcpSearch(alpha, cfgPath, "@nope engine", false); err == nil {
+		t.Fatal("unknown project must error")
+	}
+	if _, err := mcpSearch(alpha, cfgPath, "@all", false); err == nil {
+		t.Fatal("selector with no query must error")
+	}
+}
+
 func TestMCPSearchOmitsContentOnManyHits(t *testing.T) {
 	proj, cfgPath := mcpFixture(t)
 	for _, p := range []string{"a", "b", "c", "d"} {
