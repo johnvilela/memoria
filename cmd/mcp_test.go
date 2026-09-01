@@ -66,6 +66,14 @@ func TestMCPSearch(t *testing.T) {
 	}
 }
 
+func TestMCPInstructions(t *testing.T) {
+	for _, w := range []string{"memoria_search", "memoria_write_page", "memoria_recall", "@all"} {
+		if !strings.Contains(mcpInstructions, w) {
+			t.Fatalf("server instructions missing %q", w)
+		}
+	}
+}
+
 func TestMCPSearchCrossProject(t *testing.T) {
 	alpha, _, cfgPath := crossFixture(t)
 	res, err := mcpSearch(alpha, cfgPath, "@all engine", false)

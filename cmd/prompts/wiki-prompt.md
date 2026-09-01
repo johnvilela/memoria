@@ -41,6 +41,11 @@ Do:
   pages with the right `kind` classification.
 - Preserve the user's actual phrasing for decisions and rules —
   these are load-bearing.
+- Write for an agent audience: imperative, actionable statements
+  ('use X', 'never Y — it breaks Z'), stated with the confidence
+  the observations support. Future agents treat these pages as
+  project ground truth; hedge only where the observations
+  themselves were uncertain.
 - Write the page at whatever length the observations *actually*
   warrant. Don't pad with generic tutorial filler, but don't
   truncate substance either. Dense fact beats artificial

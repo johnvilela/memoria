@@ -53,7 +53,7 @@ Differentiator vs. existing solutions: hooks + cronjobs + markdown files, human-
 | `list` | done | List registered projects as a table (name, wiki folder, path) straight from `config.yaml` — registry order, works without a TTY. A path that no longer exists (renamed/deleted folder) shows `✗ missing` plus a hint to run `memoria remove`; a `Global capture: on (<root>)` line is appended when global mode is enabled |
 | `remove` | done | Interactive picker (TTY-only — exit 1 non-TTY or with no registered projects; esc cancels with exit 0, the picker is the confirmation) that unregisters one project: drops the config entry, then its pending.yaml key, status.yaml entry and `<name>.run.log` — but only when no remaining project shares the Name (sidecar state is name-keyed and a moved folder can be registered twice). Refuses while the project's background job is running. Never touches the project folder (wiki, `.memoria/`, AGENTS.md), so re-running `bootstrap` there fully restores the registration |
 | `update [-y]` | done | Self-update from the latest GitHub release: compares `tag_name` numerically against `version` (dev builds ahead of the release are left alone), prints the release notes (`body`), then TTY yes/no prompt → download `memoria_<os>_<arch>` + `checksums.txt`, verify sha256, atomic rename over `os.Executable()` (symlinks resolved to the target). `-y` skips the prompt; non-TTY without `-y` prints the info + a `update -y` hint and exits 0 |
-| `mcp` | done (internal) | Stdio MCP server (official Go SDK), registered by init, launched by the agent with cwd = project root. Tools: `memoria_search` (text/`#tag`, `include_trash`; leading `@project`/`@all` query tokens search other/all registered projects — matches always carry a `project` field and are ranked by occurrence count; page content inlined only on ≤3 hits — inlining stamps a sessions page's `lastUsed`, path-only listings don't), `memoria_recall` (read-only handoff packet of a past session — git checkpoint, event log, last state; no LLM, no page writes beyond the `lastUsed` stamp on the session page; `session_id` defaults to the most recent session), `memoria_digest` (compile a session's log into `sessions/<sid>.md` — writes/overwrites the page, preserving `lastUsed`; the done-poll that returns the page also stamps it; `session_id` defaults to the most recent session), `memoria_consolidate` (batch-consolidate ended sessions; `state=done` returns the proposal's page list, `apply=true` writes it — the agent is the reviewer), `memoria_lint` (findings from `.memoria/lint.jsonl`; done + no file = clean), `memoria_write_page` (validated path, Go renders tags frontmatter), `memoria_delete_page` (move to `trash/<orig-path>`, `-N` suffix on collision, adds a `deleted` tag; wikilinks to it may remain). digest/consolidate/lint are background jobs sharing the project's one status.yaml slot: first call spawns (`digest`/`process`/`lint` `--foreground`), later calls poll started/running/done/idle; a failed run auto-retries on the next poll with the old error in `detail`. stdout is protocol — diagnostics go to memoria.log only |
+| `mcp` | done (internal) | Stdio MCP server (official Go SDK), registered by init, launched by the agent with cwd = project root. The initialize result carries a server-level `Instructions` string (`mcpInstructions` in mcp.go, via `mcp.ServerOptions`) pitching the workflow: search first, write durable findings as you go, recall for continuity, pages are ground truth. Tools: `memoria_search` (text/`#tag`, `include_trash`; leading `@project`/`@all` query tokens search other/all registered projects — matches always carry a `project` field and are ranked by occurrence count; page content inlined only on ≤3 hits — inlining stamps a sessions page's `lastUsed`, path-only listings don't), `memoria_recall` (read-only handoff packet of a past session — git checkpoint, event log, last state; no LLM, no page writes beyond the `lastUsed` stamp on the session page; `session_id` defaults to the most recent session), `memoria_digest` (compile a session's log into `sessions/<sid>.md` — writes/overwrites the page, preserving `lastUsed`; the done-poll that returns the page also stamps it; `session_id` defaults to the most recent session), `memoria_consolidate` (batch-consolidate ended sessions; `state=done` returns the proposal's page list, `apply=true` writes it — the agent is the reviewer), `memoria_lint` (findings from `.memoria/lint.jsonl`; done + no file = clean; no MCP apply — the findings detail points at memoria_write_page/memoria_delete_page or the CLI's `lint --apply`/`--deny`), `memoria_write_page` (validated path, Go renders tags frontmatter), `memoria_delete_page` (move to `trash/<orig-path>`, `-N` suffix on collision, adds a `deleted` tag; wikilinks to it may remain). digest/consolidate/lint are background jobs sharing the project's one status.yaml slot: first call spawns (`digest`/`process`/`lint` `--foreground`), later calls poll started/running/done/idle; a failed run auto-retries on the next poll with the old error in `detail`. stdout is protocol — diagnostics go to memoria.log only |
 | `digest <sid> [--foreground]` | done (internal) | Compile one session's digest (newest incarnation, pending first) plus the current `sessions/<sid>.md` page into a clean episodic page via the single-file prompt (embedded default, overridable at `~/.config/memoria/digest-prompt.md`, expects `{title,body_markdown,tags}`). Detaches by default with the usual status.yaml tracking; spawned by MCP `memoria_digest`. `# title` heading prepended when the body lacks one; sid validated as a bare basename |
 | `hook <name>` | done (internal) | Called by agent hooks; appends events to the session digest |
 
@@ -126,18 +126,25 @@ Differentiator vs. existing solutions: hooks + cronjobs + markdown files, human-
 <!-- memoria:start -->
 ## Project memory (memoria)
 
-Curated long-term memory from past agent sessions lives in `wiki/`:
-decisions made, rules to follow, gotchas hit, concepts explained.
-Before non-trivial changes: read `wiki/index.md`, then grep `wiki/`
-for keywords. Pages carry YAML `tags:` frontmatter for topic lookup.
-Prefer the memoria MCP tools when available: memoria_search,
-memoria_recall, memoria_digest, memoria_consolidate, memoria_lint,
-memoria_write_page, memoria_delete_page.
-To recall what a past session did, call memoria_recall (read-only).
-memoria_digest WRITES the session's wiki page — only when the user
-asks to save the session.
-Session pages (sessions/) decay: unused ones move to trash/ after
-~15 days and are purged after ~30 (configurable). Reading a page via
-search or recall keeps it alive. The lastUsed frontmatter line is
-memoria's — never write or edit it.
+`wiki/` is this project's long-term memory: decisions, rules,
+gotchas and concepts distilled from past agent sessions. Treat its
+pages as project ground truth — they record what actually happened
+here, so trust them over guesses about the codebase. If the code
+contradicts a page, the code won — update the page (memoria_write_page).
+
+Before any non-trivial task, call memoria_search for the topic (no
+MCP? read `wiki/index.md`, then grep `wiki/` — pages carry YAML
+`tags:` frontmatter). Prefix queries with @<project> or @all to
+search other registered projects. Resuming or asked about earlier
+work? memoria_recall returns that session's full context (read-only).
+
+When you discover something durable — a decision taken, a gotcha
+hit, a rule agreed — save it immediately with memoria_write_page;
+pages outside sessions/ never expire. memoria_digest WRITES the
+session's wiki page: use it only when the user asks to save.
+
+Session pages (sessions/) decay when unused: trashed after ~15 days,
+purged after ~30 (configurable). Reading them via search or recall
+keeps them alive. The lastUsed frontmatter line is memoria's — never
+write or edit it.
 <!-- memoria:end -->

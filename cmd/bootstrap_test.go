@@ -287,6 +287,12 @@ func TestBootstrapWritesAgentsBlock(t *testing.T) {
 	if !strings.Contains(s, "wiki/index.md") {
 		t.Fatalf("wiki folder not referenced: %q", s)
 	}
+	// the block must sell the search-first / write-as-you-go workflow
+	for _, w := range []string{"memoria_search", "memoria_write_page", "memoria_recall", "@all"} {
+		if !strings.Contains(s, w) {
+			t.Fatalf("block missing %q: %q", w, s)
+		}
+	}
 	c, err := os.ReadFile(filepath.Join(proj, "CLAUDE.md"))
 	if err != nil || !strings.Contains(string(c), "Read [AGENTS.md](AGENTS.md)") {
 		t.Fatalf("CLAUDE.md shim = %q, %v", c, err)
