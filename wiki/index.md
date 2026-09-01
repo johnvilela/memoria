@@ -9,7 +9,8 @@ Start with [[concepts/architecture-overview]] for the pipeline end to end.
 - [[concepts/architecture-overview]] — capture → consolidate → recall pipeline, config, processors
 - [[concepts/session-capture]] — hooks, live digests, session titles, implicit session end, incarnations
 - [[concepts/consolidation-pipeline]] — `process`, JSON proposal, lint, cron timer
-- [[concepts/mcp-server]] — the seven MCP tools agents get; `memoria_recall` is the read-only recall path
+- [[concepts/mcp-server]] — the seven MCP tools agents get; `memoria_recall` is the read-only recall path; server-level Instructions + trust-rewritten tool descriptions since PR #12 (v0.13.0)
+- [[concepts/cross-project-search]] — `@project`/`@all` selectors let `memoria search` and MCP `memoria_search` reach sibling projects' wikis — shipped PR #12, v0.13.0
 - [[concepts/init-setup-multi-agent]] — multi-agent hook/MCP install, the `clients:` registry in config
 - [[concepts/recall-and-run]] — bootstrap, AGENTS.md recall block, `run`'s session picker + cross-harness handoff packet (ask-first since `6414c80`), `search`
 - [[concepts/multirepo-parent-project]] — how memoria behaves on a multirepo parent folder; the eparts verdict — adaptations shipped as `31b7251`
@@ -94,3 +95,4 @@ Start with [[concepts/architecture-overview]] for the pipeline end to end.
 - [[sessions/6f2b7832-1db8-4e7a-a2c0-ca0cc207e4c8]] — `memoria update` self-update command + release-binary install script shipped on `feat/update-command` (no PR yet); release binaries trimmed ~15MB→~10MB via `-ldflags="-s -w"`
 - [[sessions/de6b74fc-4caf-4133-ab00-ee307afe6d78]] — `memoria status` restyled as a lipgloss table (PR #5, unmerged, version bumped to 0.10.0); no-AI-attribution rule set after a PR body correction
 - [[sessions/acbf5d0d-d82b-4852-98fc-97cfbfb5da35]] — PR #9 closed as redundant (fix already on main via `8c0432e`); ai-memory Q&A on SQLite/FTS5/link-neighbor/decay; `lastUsed` session-page decay shipped, PR #10 (open, not approved), version bumped to 0.12.0
+- [[sessions/075393cf-e94c-4b79-a4c5-4feec580aa66]] — cross-project search selectors + MCP trust rewrite shipped: PR #12 (v0.12.1→0.13.0)
