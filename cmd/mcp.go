@@ -18,7 +18,9 @@ import (
 // pitch; per-tool contracts live in the tool descriptions.
 const mcpInstructions = `memoria is this project's long-term memory: a curated wiki of decisions, rules, gotchas and concepts distilled from past agent sessions. Its pages are project ground truth — every claim is grounded in what actually happened here, so trust them over guesses about the codebase; if the code contradicts a page, the code has moved on — update the page.
 
-Workflow: call memoria_search before starting non-trivial work (prefix @<project> or @all to reach sibling projects); call memoria_recall to resume or explain earlier sessions; and when you discover something durable mid-session — a decision, a gotcha, a rule — save it immediately with memoria_write_page. Unsaved findings die with the session.`
+Workflow: call memoria_search before starting non-trivial work (prefix @<project> or @all to reach sibling projects); call memoria_recall to resume or explain earlier sessions; and when you discover something durable mid-session — a decision, a gotcha, a rule — save it immediately with memoria_write_page. Unsaved findings die with the session.
+
+Before creating a PR, flush the session: call memoria_consolidate with end_current=true, apply it, and commit the wiki changes to the feature branch — otherwise the wiki for that work lands only after the chat closes, on whatever branch is checked out then.`
 
 type pageHit struct {
 	Project string `json:"project"`
@@ -197,10 +199,22 @@ func mcpDigest(cwd, configPath, sessionID string) (mcpJobOut, error) {
 	return mcpJob(cwd, configPath, projName, ready, "digest", sid, "--foreground")
 }
 
-func mcpConsolidate(cwd, configPath string, apply bool) (mcpJobOut, error) {
+func mcpConsolidate(cwd, configPath string, apply, endCurrent bool) (mcpJobOut, error) {
 	cfg, proj, projName, wikiRoot, err := resolveWorkspace(cwd, configPath)
 	if err != nil {
 		return mcpJobOut{}, err
+	}
+	if endCurrent {
+		// only a live pending session can be ended; polls after the first call
+		// (ended_at already set) and processed digests fall through untouched
+		if _, digest, err := resolveSession(proj, ""); err == nil &&
+			filepath.Base(filepath.Dir(digest)) == "pending" {
+			if front, _ := parseDigest(digest); frontKey(front, "ended_at") == "" {
+				if err := finalizeSession(configPath, projName, digest); err != nil {
+					return mcpJobOut{}, err
+				}
+			}
+		}
 	}
 	proposalPath := filepath.Join(proj, ".memoria", "proposal.json")
 	if apply {
@@ -395,16 +409,17 @@ func runMCP(configPath string, out io.Writer) int {
 		})
 
 	type consolidateIn struct {
-		Apply bool `json:"apply,omitempty" jsonschema:"write the ready proposal's pages to the wiki"`
+		Apply      bool `json:"apply,omitempty" jsonschema:"write the ready proposal's pages to the wiki"`
+		EndCurrent bool `json:"end_current,omitempty" jsonschema:"mark the caller's still-open session ended first, then consolidate — the pre-PR flush that lets wiki pages ride the feature branch; pass it on the first call only, not on polls"`
 	}
 	mcp.AddTool(srv, &mcp.Tool{Name: "memoria_consolidate",
-		Description: "Distill ended sessions into durable wiki pages (concepts, decisions, gotchas, rules). Background LLM job: the first call starts it; poll until state=done, which lists the proposed page paths (paths only — read the pages to review), then call again with apply=true to write them; apply also archives the consumed sessions and may auto-commit the wiki. state=idle means no ended sessions to consolidate — success, not an error. apply=true without a ready proposal errors; when auto_apply is configured the run applies itself and done reports \"applied …\"."},
+		Description: "Distill ended sessions into durable wiki pages (concepts, decisions, gotchas, rules). Background LLM job: the first call starts it; poll until state=done, which lists the proposed page paths (paths only — read the pages to review), then call again with apply=true to write them; apply also archives the consumed sessions and may auto-commit the wiki. state=idle means no ended sessions to consolidate — success, not an error. apply=true without a ready proposal errors; when auto_apply is configured the run applies itself and done reports \"applied …\". Pass end_current=true (first call only) to flush the current session before a PR: it marks the session ended so its wiki pages are written now, on the current branch, instead of after the chat closes."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in consolidateIn) (*mcp.CallToolResult, mcpJobOut, error) {
 			d, err := cwd()
 			if err != nil {
 				return nil, mcpJobOut{}, err
 			}
-			res, err := mcpConsolidate(d, configPath, in.Apply)
+			res, err := mcpConsolidate(d, configPath, in.Apply, in.EndCurrent)
 			return nil, res, err
 		})
 

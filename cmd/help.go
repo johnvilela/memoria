@@ -29,6 +29,7 @@ var commands = []command{
 	{name: "lint", desc: "Audit the wiki for contradictions in the background (--review, --apply a fix, --deny \"why\")"},
 	{name: "run", desc: "Launch a code agent here, continuing a previous session (--new, --session <id|name>; no flags → pick from the last 5)"},
 	{name: "search", desc: "Find wiki pages by text or #tag, pick one to read (@project/@all searches other projects, --trash includes deleted pages)"},
+	{name: "finalize", desc: "End the current session now and write its wiki pages — flush before a PR so they ride the same branch (--no-apply reviews first; optional session id)"},
 	{name: "commit", desc: "Commit the wiki folder's changes — new and modified pages (-m overrides the subject)"},
 	{name: "mcp", desc: "Serve the memoria tools to code agents over stdio", internal: true},
 	{name: "status", desc: "Show background processing state per project"},

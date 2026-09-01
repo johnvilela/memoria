@@ -8,7 +8,7 @@ import (
 )
 
 // version is bumped by hand on release, together with the matching git tag.
-const version = "0.13.0"
+const version = "0.14.0"
 
 func run(args []string, stdin io.Reader, out io.Writer) int {
 	arg := ""
@@ -96,6 +96,13 @@ func run(args []string, stdin io.Reader, out io.Writer) int {
 			return 1
 		}
 		return runDigest(cwd, defaultConfigPath(), args[1:], out)
+	case "finalize":
+		cwd, err := os.Getwd()
+		if err != nil {
+			fmt.Fprintln(out, "error:", err)
+			return 1
+		}
+		return runFinalize(cwd, defaultConfigPath(), args[1:], out)
 	case "status":
 		return runStatus(defaultConfigPath(), out)
 	case "list":
@@ -107,9 +114,10 @@ func run(args []string, stdin io.Reader, out io.Writer) int {
 	case "mcp":
 		return runMCP(defaultConfigPath(), out)
 	case "hook":
-		// must never block the agent: silent, always 0, nothing on stdout
+		// must never block the agent: always exit 0; stdout carries only
+		// additive hook JSON (context), errors go to the file log
 		if len(args) > 1 {
-			if err := captureHook(args[1], args[2:], stdin, defaultConfigPath()); err != nil {
+			if err := captureHook(args[1], args[2:], stdin, out, defaultConfigPath()); err != nil {
 				logf("hook", "%s: %v", args[1], err)
 			}
 		}
