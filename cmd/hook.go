@@ -143,7 +143,8 @@ func indexSession(proj, sid, prompt string) error {
 // captureHook appends the event as an "@hook ..." line to the session digest
 // at <project>/.memoria/sessions/pending/<session_id>.md for tracked
 // projects. Untracked project, missing config, or bad payload → silent no-op.
-func captureHook(name string, hookArgs []string, stdin io.Reader, configPath string) error {
+// out carries only additive hook JSON (the pre-PR nudge) — never a block.
+func captureHook(name string, hookArgs []string, stdin io.Reader, out io.Writer, configPath string) error {
 	client := ""
 	if len(hookArgs) >= 2 && hookArgs[0] == "--client" {
 		client = hookArgs[1]
@@ -183,8 +184,19 @@ func captureHook(name string, hookArgs []string, stdin io.Reader, configPath str
 			return err
 		}
 	}
+	// checked before this event is appended: a PR created from a session whose
+	// digest already holds observations means unflushed wiki work
+	nudge := client == "claude-code" && name == "post-tool-use" &&
+		strings.Contains(bashCmd(payload), "gh pr create") &&
+		toolError(payload["tool_response"]) == "" && digestPending(proj, sid)
 	if err := appendDigest(proj, projName, sourceRoot, sid, name, client, payload, queuePath(configPath)); err != nil {
 		return err
+	}
+	if nudge {
+		hookContext(out, "PostToolUse", "memoria: this session's wiki pages haven't been written yet — "+
+			"they normally land only after the chat closes, on whatever branch is checked out then. "+
+			"To ship them in this PR: call memoria_consolidate with end_current=true, apply it, and "+
+			"commit the wiki changes to this branch (CLI: memoria finalize).")
 	}
 	if client == "claude-code" && (name == "stop" || name == "session-end") {
 		if err := captureTitle(proj, sid); err != nil {
@@ -195,6 +207,35 @@ func captureHook(name string, hookArgs []string, stdin io.Reader, configPath str
 		autoConsolidate(configPath, proj, projName)
 	}
 	return nil
+}
+
+// bashCmd returns the Bash command of a tool payload, "" for other tools.
+func bashCmd(payload map[string]any) string {
+	if tool, _ := payload["tool_name"].(string); tool != "Bash" {
+		return ""
+	}
+	input, _ := payload["tool_input"].(map[string]any)
+	cmd, _ := input["command"].(string)
+	return cmd
+}
+
+// digestPending reports whether the session has a pending digest holding real
+// observations — work captured but not yet turned into wiki pages.
+func digestPending(proj, sid string) bool {
+	path, _ := resolveDigestPath(proj, sid)
+	b, err := os.ReadFile(path)
+	return err == nil && digestHasContent(string(b))
+}
+
+// hookContext hands the agent extra context through the hook protocol —
+// stdout JSON with exit 0 is additive, never blocking (ADR 0003).
+func hookContext(out io.Writer, event, ctx string) {
+	_ = json.NewEncoder(out).Encode(map[string]any{
+		"hookSpecificOutput": map[string]any{
+			"hookEventName":     event,
+			"additionalContext": ctx,
+		},
+	})
 }
 
 // autoConsolidate is the auto_apply trigger: session end spawns a detached

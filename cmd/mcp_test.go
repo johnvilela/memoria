@@ -310,7 +310,7 @@ func TestMCPConsolidate(t *testing.T) {
 	proj, cfgPath := mcpFixture(t)
 	spawned := stubSpawn(t, 4242)
 	// no ended sessions → idle, nothing spawned
-	res, err := mcpConsolidate(proj, cfgPath, false)
+	res, err := mcpConsolidate(proj, cfgPath, false, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -325,7 +325,7 @@ func TestMCPConsolidate(t *testing.T) {
 	if err := queueMarkEnded(queuePath(cfgPath), filepath.Base(proj), d); err != nil {
 		t.Fatal(err)
 	}
-	if res, _ = mcpConsolidate(proj, cfgPath, false); res.State != "started" {
+	if res, _ = mcpConsolidate(proj, cfgPath, false, false); res.State != "started" {
 		t.Fatalf("state = %q", res.State)
 	}
 	want := []string{proj, "process", "--foreground"}
@@ -337,7 +337,7 @@ func TestMCPConsolidate(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(proj, ".memoria", "proposal.json"), []byte(prop), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	res, err = mcpConsolidate(proj, cfgPath, false)
+	res, err = mcpConsolidate(proj, cfgPath, false, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -345,7 +345,7 @@ func TestMCPConsolidate(t *testing.T) {
 		t.Fatalf("res = %+v", res)
 	}
 	// apply writes the wiki and consumes the proposal
-	res, err = mcpConsolidate(proj, cfgPath, true)
+	res, err = mcpConsolidate(proj, cfgPath, true, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -360,7 +360,7 @@ func TestMCPConsolidate(t *testing.T) {
 		t.Fatal("proposal not consumed")
 	}
 	// apply without proposal → error
-	if _, err := mcpConsolidate(proj, cfgPath, true); err == nil {
+	if _, err := mcpConsolidate(proj, cfgPath, true, false); err == nil {
 		t.Fatal("apply without proposal must error")
 	}
 }
@@ -415,7 +415,7 @@ func TestMCPBusySharedJobSlot(t *testing.T) {
 	}
 	for name, call := range map[string]func() (mcpJobOut, error){
 		"digest":      func() (mcpJobOut, error) { return mcpDigest(proj, cfgPath, "") },
-		"consolidate": func() (mcpJobOut, error) { return mcpConsolidate(proj, cfgPath, false) },
+		"consolidate": func() (mcpJobOut, error) { return mcpConsolidate(proj, cfgPath, false, false) },
 		"lint":        func() (mcpJobOut, error) { return mcpLint(proj, cfgPath) },
 	} {
 		res, err := call()
@@ -453,7 +453,7 @@ func TestMCPConsolidateAutoApplied(t *testing.T) {
 	if err := statusSet(statusPath(cfgPath), filepath.Base(proj), "done", 0, "applied 2 pages from 1 sessions"); err != nil {
 		t.Fatal(err)
 	}
-	res, err := mcpConsolidate(proj, cfgPath, false)
+	res, err := mcpConsolidate(proj, cfgPath, false, false)
 	if err != nil {
 		t.Fatal(err)
 	}
