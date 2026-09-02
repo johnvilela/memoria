@@ -124,3 +124,43 @@ func findMemoriaHook(entries []any, name string) map[string]any {
 	}
 	return nil
 }
+
+// trustRule allows every memoria MCP tool in Claude Code's permission
+// system — one server-level rule, no per-tool listing to keep in sync.
+const trustRule = "mcp__memoria"
+
+// installTrust merges trustRule into permissions.allow in a Claude Code
+// settings file, preserving every existing key and rule. Idempotent.
+// Claude Code only — Codex has no per-tool allowlist equivalent.
+func installTrust(settingsPath string) error {
+	raw := map[string]any{}
+	b, err := os.ReadFile(settingsPath)
+	switch {
+	case err == nil:
+		if err := json.Unmarshal(b, &raw); err != nil {
+			return fmt.Errorf("parse %s: %w", settingsPath, err)
+		}
+	case !errors.Is(err, os.ErrNotExist):
+		return err
+	}
+	perms, _ := raw["permissions"].(map[string]any)
+	if perms == nil {
+		perms = map[string]any{}
+	}
+	allow, _ := perms["allow"].([]any)
+	for _, r := range allow {
+		if r == trustRule {
+			return nil
+		}
+	}
+	perms["allow"] = append(allow, trustRule)
+	raw["permissions"] = perms
+	out, err := json.MarshalIndent(raw, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(settingsPath, append(out, '\n'), 0o644)
+}

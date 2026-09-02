@@ -365,6 +365,30 @@ func TestMCPConsolidate(t *testing.T) {
 	}
 }
 
+func TestMCPConsolidateStaleDoneRespawns(t *testing.T) {
+	proj, cfgPath := mcpFixture(t)
+	spawned := stubSpawn(t, 4242)
+	// an earlier auto-apply run left a done status; its sessions are long consumed
+	if err := statusSet(statusPath(cfgPath), filepath.Base(proj), "done", 0, "applied 4 pages from 1 sessions"); err != nil {
+		t.Fatal(err)
+	}
+	// a new session ends → the flush must spawn, not echo the stale done
+	d := digestFile(proj, "s1")
+	if err := queueAdd(queuePath(cfgPath), filepath.Base(proj), d); err != nil {
+		t.Fatal(err)
+	}
+	if err := queueMarkEnded(queuePath(cfgPath), filepath.Base(proj), d); err != nil {
+		t.Fatal(err)
+	}
+	res, err := mcpConsolidate(proj, cfgPath, false, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.State != "started" || len(*spawned) == 0 {
+		t.Fatalf("stale done must respawn: res = %+v, spawned = %v", res, *spawned)
+	}
+}
+
 func TestMCPLint(t *testing.T) {
 	proj, cfgPath := mcpFixture(t)
 	spawned := stubSpawn(t, 4242)
