@@ -22,6 +22,9 @@ Workflow: call memoria_search before starting non-trivial work (prefix @<project
 
 Before creating a PR, flush the session: call memoria_consolidate with end_current=true, apply it, and commit the wiki changes to the feature branch — otherwise the wiki for that work lands only after the chat closes, on whatever branch is checked out then.`
 
+// errNotTracked is a sentinel so search can swap in its @all escape hatch.
+var errNotTracked = errors.New("not inside a tracked project (run memoria bootstrap first)")
+
 type pageHit struct {
 	Project string `json:"project"`
 	Path    string `json:"path"`
@@ -77,7 +80,7 @@ func resolveWorkspace(cwd, configPath string) (cfg config, proj, projName, wikiR
 	}
 	p, ok := resolveProject(cfg, configPath, cwd)
 	if !ok {
-		return cfg, "", "", "", fmt.Errorf("not inside a tracked project (run memoria bootstrap first)")
+		return cfg, "", "", "", errNotTracked
 	}
 	if p.Name == globalName {
 		cfg = globalCommitCfg(cfg)
@@ -366,11 +369,11 @@ func runMCP(configPath string, out io.Writer) int {
 	cwd := func() (string, error) { return os.Getwd() }
 
 	type searchIn struct {
-		Query        string `json:"query" jsonschema:"text substring or #tag to find wiki pages; lead with @project tokens or @all to search other/all registered projects (e.g. '@api queue' or '@all engine')"`
+		Query        string `json:"query" jsonschema:"text terms or #tag to find wiki pages — pages matching every term win, else best partial matches; lead with @project tokens or @all to search other/all registered projects (e.g. '@api queue' or '@all engine')"`
 		IncludeTrash bool   `json:"include_trash,omitempty" jsonschema:"also search deleted pages under trash/"`
 	}
 	mcp.AddTool(srv, &mcp.Tool{Name: "memoria_search",
-		Description: "Search the project's memory wiki — decisions, rules, gotchas and concepts from past sessions. Call this before starting non-trivial work: pages record gotchas and decisions the code alone won't show, and matches are project ground truth. Query by text substring or #tag; lead with @<project-name> tokens (repeatable) or @all to search other/all registered projects (an unknown name errors listing the known ones); from an unregistered folder the global wiki is searched when global mode is on. Page content is inlined only when there are ≤3 hits — more hits return paths only, so narrow the query and search again (only inlined reads refresh a sessions/ page's lastUsed and keep it from decaying). Pages reference each other with [[wikilinks]] — follow relevant links with further searches. Trashed pages are excluded unless include_trash is set (hits come back keyed trash/<orig-path>)."},
+		Description: "Search the project's memory wiki — decisions, rules, gotchas and concepts from past sessions. Call this before starting non-trivial work: pages record gotchas and decisions the code alone won't show, and matches are project ground truth. Query by text terms (pages containing every term win, else the best partial matches, so phrases are fine) or #tag; lead with @<project-name> tokens (repeatable) or @all to search other/all registered projects (an unknown name errors listing the known ones); from an unregistered folder the global wiki is searched when global mode is on. Page content is inlined only when there are ≤3 hits — more hits return paths only, so narrow the query and search again (only inlined reads refresh a sessions/ page's lastUsed and keep it from decaying). Pages reference each other with [[wikilinks]] — follow relevant links with further searches. Trashed pages are excluded unless include_trash is set (hits come back keyed trash/<orig-path>)."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in searchIn) (*mcp.CallToolResult, mcpSearchOut, error) {
 			d, err := cwd()
 			if err != nil {
