@@ -231,27 +231,30 @@ func mcpConsolidate(cwd, configPath string, apply, endCurrent bool) (mcpJobOut, 
 		}
 		return mcpJobOut{State: "done", Detail: "proposal applied", Pages: pages}, nil
 	}
-	ready := func(s procStatus) (mcpJobOut, bool) {
+	proposalReady := func(procStatus) (mcpJobOut, bool) {
 		pages, err := proposalPages(proposalPath)
-		if err == nil {
-			return mcpJobOut{State: "done", Pages: pages,
-				Detail: "proposal ready — review the pages, then call again with apply=true"}, true
+		if err != nil {
+			return mcpJobOut{}, false
 		}
-		// auto_apply runs consume the proposal themselves
-		if s.State == "done" && strings.HasPrefix(s.Detail, "applied") {
-			return mcpJobOut{State: "done", Detail: s.Detail}, true
-		}
-		return mcpJobOut{}, false
+		return mcpJobOut{State: "done", Pages: pages,
+			Detail: "proposal ready — review the pages, then call again with apply=true"}, true
 	}
 	// nothing pending and no proposal waiting → spawning would loop forever
 	if sessions, _, err := collectEnded(queuePath(configPath), projName); err == nil && len(sessions) == 0 {
 		st, _ := loadStatus(statusPath(configPath))
-		if r, ok := ready(st[projName]); ok {
+		if r, ok := proposalReady(st[projName]); ok {
 			return r, nil
+		}
+		// auto_apply runs consume the proposal themselves
+		if s := st[projName]; s.State == "done" && strings.HasPrefix(s.Detail, "applied") {
+			return mcpJobOut{State: "done", Detail: s.Detail}, nil
 		}
 		return mcpJobOut{State: "idle", Detail: "no ended sessions to consolidate"}, nil
 	}
-	return mcpJob(cwd, configPath, projName, ready, "process", "--foreground")
+	// ended sessions exist, so a done status is from an earlier run — an
+	// applied run consumes its sessions; only an unconsumed proposal counts
+	// as ready here, anything else respawns
+	return mcpJob(cwd, configPath, projName, proposalReady, "process", "--foreground")
 }
 
 func proposalPages(proposalPath string) ([]string, error) {
@@ -372,7 +375,10 @@ func runMCP(configPath string, out io.Writer) int {
 		Query        string `json:"query" jsonschema:"text terms or #tag to find wiki pages — pages matching every term win, else best partial matches; lead with @project tokens or @all to search other/all registered projects (e.g. '@api queue' or '@all engine')"`
 		IncludeTrash bool   `json:"include_trash,omitempty" jsonschema:"also search deleted pages under trash/"`
 	}
-	mcp.AddTool(srv, &mcp.Tool{Name: "memoria_search",
+	// readOnlyHint: search/recall only stamp lastUsed — advisory for clients
+	// that relax approval on read-only tools
+	readOnly := &mcp.ToolAnnotations{ReadOnlyHint: true}
+	mcp.AddTool(srv, &mcp.Tool{Name: "memoria_search", Annotations: readOnly,
 		Description: "Search the project's memory wiki — decisions, rules, gotchas and concepts from past sessions. Call this before starting non-trivial work: pages record gotchas and decisions the code alone won't show, and matches are project ground truth. Query by text terms (pages containing every term win, else the best partial matches, so phrases are fine) or #tag; lead with @<project-name> tokens (repeatable) or @all to search other/all registered projects (an unknown name errors listing the known ones); from an unregistered folder the global wiki is searched when global mode is on. Page content is inlined only when there are ≤3 hits — more hits return paths only, so narrow the query and search again (only inlined reads refresh a sessions/ page's lastUsed and keep it from decaying). Pages reference each other with [[wikilinks]] — follow relevant links with further searches. Trashed pages are excluded unless include_trash is set (hits come back keyed trash/<orig-path>)."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in searchIn) (*mcp.CallToolResult, mcpSearchOut, error) {
 			d, err := cwd()
@@ -386,7 +392,7 @@ func runMCP(configPath string, out io.Writer) int {
 	type recallIn struct {
 		SessionID string `json:"session_id,omitempty" jsonschema:"session to recall; defaults to the most recent session (usually the caller's own)"`
 	}
-	mcp.AddTool(srv, &mcp.Tool{Name: "memoria_recall",
+	mcp.AddTool(srv, &mcp.Tool{Name: "memoria_recall", Annotations: readOnly,
 		Description: "Resume context from a past session: returns a self-contained handoff packet — git checkpoint, event history following the continues_from chain, and the session's wiki page when one exists. Call it at session start when continuing earlier work, or to answer \"what did we do in that session?\". Read-only, no LLM call; session_id defaults to the most recent session (usually the caller's own), and recalling refreshes the session page's lastUsed so it doesn't decay. If it errors (no sessions or no digest), fall back to memoria_search."},
 		func(ctx context.Context, req *mcp.CallToolRequest, in recallIn) (*mcp.CallToolResult, mcpRecallOut, error) {
 			d, err := cwd()

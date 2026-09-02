@@ -13,7 +13,7 @@ import (
 // and adds capture hooks for more agents without touching existing ones.
 func runSetup(args []string, configPath string, out io.Writer) int {
 	usage := func() {
-		fmt.Fprintln(out, "usage: memoria setup [--client claude-code,codex] [--processor claude-code|codex|ollama|gemini] [--notification] [--auto-apply] [--auto-commit] [--cron <expr|preset|off>] [--cron-apply] [--global] [--global-path <folder>]")
+		fmt.Fprintln(out, "usage: memoria setup [--client claude-code,codex] [--processor claude-code|codex|ollama|gemini] [--notification] [--auto-apply] [--auto-commit] [--cron <expr|preset|off>] [--cron-apply] [--global] [--global-path <folder>] [--trust=false]")
 	}
 	args = normalizeCronArgs(args)
 	fs := flag.NewFlagSet("setup", flag.ContinueOnError)
@@ -27,6 +27,7 @@ func runSetup(args []string, configPath string, out io.Writer) int {
 	cronApply := fs.Bool("cron-apply", false, "scheduled runs apply proposals without review")
 	global := fs.Bool("global", false, "capture sessions in unregistered folders (--global=false disables)")
 	gpath := fs.String("global-path", "", "move the global capture root (empty = back to the config folder)")
+	trust := fs.Bool("trust", true, "auto-allow memoria's MCP tools in Claude Code permissions (--trust=false skips)")
 	if err := fs.Parse(args); err != nil {
 		return 1
 	}
@@ -178,7 +179,7 @@ func runSetup(args []string, configPath string, out io.Writer) int {
 	}
 
 	if len(clients) > 0 {
-		if code := installClients(clients, configPath, out, usage); code != 0 {
+		if code := installClients(clients, configPath, *trust, out, usage); code != 0 {
 			return code
 		}
 	}

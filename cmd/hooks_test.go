@@ -135,3 +135,51 @@ func TestInstallHooksReplacesOldStyleCommand(t *testing.T) {
 		t.Fatalf("old-style command not replaced: %v", cmds)
 	}
 }
+
+func allowRules(t *testing.T, settings map[string]any) []string {
+	t.Helper()
+	perms, _ := settings["permissions"].(map[string]any)
+	entries, _ := perms["allow"].([]any)
+	var rules []string
+	for _, e := range entries {
+		if s, ok := e.(string); ok {
+			rules = append(rules, s)
+		}
+	}
+	return rules
+}
+
+func TestInstallTrustFresh(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	if err := installTrust(path); err != nil {
+		t.Fatal(err)
+	}
+	if rules := allowRules(t, readSettings(t, path)); len(rules) != 1 || rules[0] != "mcp__memoria" {
+		t.Fatalf("allow = %v, want [mcp__memoria]", rules)
+	}
+}
+
+func TestInstallTrustPreservesAndDedupes(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	existing := `{"model":"opus","permissions":{"allow":["Bash(ls:*)"],"deny":["WebFetch"]}}`
+	if err := os.WriteFile(path, []byte(existing), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 { // idempotent on re-runs
+		if err := installTrust(path); err != nil {
+			t.Fatal(err)
+		}
+	}
+	settings := readSettings(t, path)
+	rules := allowRules(t, settings)
+	if len(rules) != 2 || rules[0] != "Bash(ls:*)" || rules[1] != "mcp__memoria" {
+		t.Fatalf("allow = %v, want existing rule kept + mcp__memoria once", rules)
+	}
+	if settings["model"] != "opus" {
+		t.Fatalf("unrelated keys must survive: %v", settings)
+	}
+	perms, _ := settings["permissions"].(map[string]any)
+	if deny, _ := perms["deny"].([]any); len(deny) != 1 {
+		t.Fatalf("deny list must survive: %v", perms)
+	}
+}
