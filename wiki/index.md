@@ -9,7 +9,7 @@ Start with [[concepts/architecture-overview]] for the pipeline end to end.
 - [[concepts/architecture-overview]] — capture → consolidate → recall pipeline, config, processors
 - [[concepts/session-capture]] — hooks, live digests, session titles, implicit session end, incarnations
 - [[concepts/consolidation-pipeline]] — `process`, JSON proposal, lint, cron timer
-- [[concepts/mcp-server]] — the seven MCP tools agents get; `memoria_recall` is the read-only recall path; server-level Instructions + trust-rewritten tool descriptions since PR #12 (v0.13.0)
+- [[concepts/mcp-server]] — the seven MCP tools agents get; `memoria_recall` is the read-only recall path; server-level Instructions + trust-rewritten tool descriptions since PR #12 (v0.13.0); `memoria_consolidate` gained `end_current` pre-PR flush since PR #13 (v0.14.0)
 - [[concepts/cross-project-search]] — `@project`/`@all` selectors let `memoria search` and MCP `memoria_search` reach sibling projects' wikis — shipped PR #12, v0.13.0
 - [[concepts/init-setup-multi-agent]] — multi-agent hook/MCP install, the `clients:` registry in config
 - [[concepts/recall-and-run]] — bootstrap, AGENTS.md recall block, `run`'s session picker + cross-harness handoff packet (ask-first since `6414c80`), `search`
@@ -39,6 +39,7 @@ Start with [[concepts/architecture-overview]] for the pipeline end to end.
 - [[decisions/0011-deterministic-json-repair-over-retry]] — malformed processor JSON gets a deterministic byte-level repair pass instead of losing the whole batch
 - [[decisions/0012-ci-cd-release-pipeline]] — automate release on merge to main, protect main with a no-bypass GitHub ruleset; Windows dropped from release targets
 - [[decisions/0013-deterministic-decay-over-salience-model]] — reject ai-memory's SQLite/FTS5/link-neighbor ranking for memoria; adopt only a deterministic `lastUsed` decay stamp
+- [[decisions/0014-finalize-pre-pr-flush]] — `memoria finalize` ends a session early and consolidates inline so wiki pages ride the feature PR instead of trailing it — shipped `19cd647`, PR #13, version bumped to 0.14.0
 
 ## Skills — how-to references
 
@@ -96,3 +97,4 @@ Start with [[concepts/architecture-overview]] for the pipeline end to end.
 - [[sessions/de6b74fc-4caf-4133-ab00-ee307afe6d78]] — `memoria status` restyled as a lipgloss table (PR #5, unmerged, version bumped to 0.10.0); no-AI-attribution rule set after a PR body correction
 - [[sessions/acbf5d0d-d82b-4852-98fc-97cfbfb5da35]] — PR #9 closed as redundant (fix already on main via `8c0432e`); ai-memory Q&A on SQLite/FTS5/link-neighbor/decay; `lastUsed` session-page decay shipped, PR #10 (open, not approved), version bumped to 0.12.0
 - [[sessions/075393cf-e94c-4b79-a4c5-4feec580aa66]] — cross-project search selectors + MCP trust rewrite shipped: PR #12 (v0.12.1→0.13.0)
+- [[sessions/020fdeb5-ca41-4bd8-92d4-60cc589ff9b5]] — `memoria finalize` shipped: PR #13 (v0.13.0→0.14.0) — pre-PR wiki flush, plus research confirming ai-memory has the same session-end-gated gap

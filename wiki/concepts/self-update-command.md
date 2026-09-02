@@ -21,6 +21,10 @@ Built via TDD: `update_test.go` was written and confirmed red first. 10 tests co
 
 The standalone (non-in-repo) install path now downloads the checksum-verified release binary for the detected OS/arch directly, instead of `go install github.com/johnvilela/memoria/cmd/memoria@latest` — Go is only needed for in-repo/dev builds now. This resolves a `ponytail:` TODO the script had carried since before GitHub releases existed ("swap the go-install path for a release-binary download once github releases exist"). Both `install.sh` and `update` rely on the same release shape [[decisions/0012-ci-cd-release-pipeline]] and [[concepts/ci-release-pipeline]] already publish: exactly `checksums.txt` + 4 bare platform binaries (`memoria_<os>_<arch>`, no version in the filename), with changelog text available as the release's auto-generated `body`.
 
+## Interaction with the MCP server
+
+`memoria update` also updates the installed MCP server — it isn't a separate install to keep in sync. `init` registers the MCP server (and hooks) in the agent's config using the absolute path from `os.Executable()` (`cmd/init.go:444`); `update` replaces exactly that binary — symlink-resolved (`cmd/update.go:122`) and atomically renamed over the running executable (`cmd/update.go:201`). The next `memoria mcp` launch (spawned fresh at agent session start) runs the new version automatically — nothing to re-register. Caveat: an MCP server already running inside an open agent session keeps the old code in memory until that session restarts, since agents only re-read tool descriptions and server `Instructions` at the `initialize` handshake — only a *new* session started after the update picks it up. Clarified in [[sessions/075393cf-e94c-4b79-a4c5-4feec580aa66]].
+
 ## Known ceilings (marked `ponytail:` in code)
 
 - `parseVer` only understands plain `x.y.z` tags — no pre-release suffixes. Upgrade path if tags ever grow them: `golang.org/x/mod/semver`.
@@ -34,4 +38,4 @@ That last 5 MB is free to drop: `-ldflags="-s -w"` strips it with no functional 
 
 **Fix**: added `-ldflags="-s -w"` to `scripts/build.sh`'s release path only — the local/dev build path is untouched, so `delve` still attaches to local builds. Verified all four cross-compile targets (linux/darwin × amd64/arm64) rebuild at roughly 9-11 MB, down from ~15 MB (about a third smaller). Committed separately from the `update` command, on the same branch, as `build: strip symbol table and DWARF from release binaries`.
 
-Related: [[concepts/ci-release-pipeline]] (the release workflow this build/install path serves), [[decisions/0012-ci-cd-release-pipeline]] (why the release publishes exactly these assets), [[gotchas/module-path-mismatch-breaks-go-install]] (the earlier install-path problem the standalone script now supersedes).
+Related: [[concepts/ci-release-pipeline]] (the release workflow this build/install path serves), [[decisions/0012-ci-cd-release-pipeline]] (why the release publishes exactly these assets), [[gotchas/module-path-mismatch-breaks-go-install]] (the earlier install-path problem the standalone script now supersedes), [[concepts/mcp-server]] (what gets updated alongside the CLI).
