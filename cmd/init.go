@@ -48,7 +48,7 @@ var autoCommitOptions = []option{
 
 func runInit(args []string, configPath string, out io.Writer) int {
 	usage := func() {
-		fmt.Fprintln(out, "usage: memoria init [<client>...] [--client claude-code,codex] [--processor claude-code|codex|ollama|gemini] [--notification] [--auto-apply] [--auto-commit] [--cron [<expr|preset|off>]] [--cron-apply]")
+		fmt.Fprintln(out, "usage: memoria init [<client>...] [--client claude-code,codex] [--processor claude-code|codex|ollama|gemini] [--notification] [--auto-apply] [--auto-commit] [--cron [<expr|preset|off>]] [--cron-apply] [--trust=false]")
 	}
 	args = normalizeCronArgs(args)
 	// positional clients only as leading args, so flags after them still parse
@@ -65,6 +65,7 @@ func runInit(args []string, configPath string, out io.Writer) int {
 	autoCommit := fs.Bool("auto-commit", false, "commit the wiki after every applied change")
 	cron := fs.String("cron", "", "schedule for background processing (cron expression, preset, or off)")
 	cronApply := fs.Bool("cron-apply", false, "scheduled runs apply proposals without review")
+	trust := fs.Bool("trust", true, "auto-allow memoria's MCP tools in Claude Code permissions (--trust=false skips)")
 	if err := fs.Parse(args); err != nil {
 		return 1
 	}
@@ -116,7 +117,7 @@ func runInit(args []string, configPath string, out io.Writer) int {
 		}
 		clients = v
 	}
-	if code := installClients(clients, configPath, out, usage); code != 0 {
+	if code := installClients(clients, configPath, *trust, out, usage); code != 0 {
 		return code
 	}
 	ensureGitignore(out)
@@ -367,7 +368,7 @@ func normalizeClient(name string) string {
 
 // installClients validates all names first (fail fast — a typo installs
 // nothing), then installs hooks+MCP per agent and records them in the config.
-func installClients(names []string, configPath string, out io.Writer, usage func()) int {
+func installClients(names []string, configPath string, trust bool, out io.Writer, usage func()) int {
 	var clients []string
 	for _, n := range names {
 		c := normalizeClient(n)
@@ -381,7 +382,7 @@ func installClients(names []string, configPath string, out io.Writer, usage func
 		}
 	}
 	for _, c := range clients {
-		if code := installClientHooks(c, out, usage); code != 0 {
+		if code := installClientHooks(c, trust, out, usage); code != 0 {
 			return code
 		}
 	}
@@ -414,7 +415,7 @@ func recordClients(configPath string, out io.Writer, names ...string) []string {
 }
 
 // installClientHooks wires memoria into the chosen agent's global settings.
-func installClientHooks(client string, out io.Writer, usage func()) int {
+func installClientHooks(client string, trust bool, out io.Writer, usage func()) int {
 	var (
 		events map[string]string
 		label  string
@@ -452,6 +453,13 @@ func installClientHooks(client string, out io.Writer, usage func()) int {
 		return 1
 	}
 	fmt.Fprintf(out, "Installed %d %s hooks in %s\n", len(events), label, settingsPath)
+	if trust && client == "claude-code" {
+		if err := installTrust(settingsPath); err != nil {
+			fmt.Fprintln(out, "warning: could not allow memoria MCP tools:", err)
+		} else {
+			fmt.Fprintf(out, "Allowed memoria MCP tools (%s) in %s — skip with --trust=false\n", trustRule, settingsPath)
+		}
+	}
 	mcpPath := filepath.Join(home, ".claude.json")
 	installMCP := installMCPClaude
 	if client == "codex" {

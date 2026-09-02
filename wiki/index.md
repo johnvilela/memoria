@@ -11,6 +11,7 @@ Start with [[concepts/architecture-overview]] for the pipeline end to end.
 - [[concepts/consolidation-pipeline]] — `process`, JSON proposal, lint, cron timer
 - [[concepts/mcp-server]] — the seven MCP tools agents get; `memoria_recall` is the read-only recall path; server-level Instructions + trust-rewritten tool descriptions since PR #12 (v0.13.0)
 - [[concepts/cross-project-search]] — `@project`/`@all` selectors let `memoria search` and MCP `memoria_search` reach sibling projects' wikis — shipped PR #12, v0.13.0; multi-word matching fixed from substring-only to tokenized AND + ranked fallback in v0.15.0
+- [[concepts/mcp-auto-trust]] — `installTrust` auto-allow-lists `mcp__memoria` in Claude Code's `settings.json` on init/setup (default on, `--trust=false` opts out), plus `readOnlyHint` on the search/recall tools — shipped PR #16, v0.16.0
 - [[concepts/init-setup-multi-agent]] — multi-agent hook/MCP install, the `clients:` registry in config
 - [[concepts/recall-and-run]] — bootstrap, AGENTS.md recall block, `run`'s session picker + cross-harness handoff packet (ask-first since `6414c80`), `search`
 - [[concepts/multirepo-parent-project]] — how memoria behaves on a multirepo parent folder; the eparts verdict — adaptations shipped as `31b7251`
@@ -61,6 +62,7 @@ Start with [[concepts/architecture-overview]] for the pipeline end to end.
 - [[gotchas/processor-json-parse-failures]] — cheap-model quote-escaping bugs silently poisoned whole consolidation batches; fixed by deterministic repair in `6f653b9`
 - [[gotchas/search-substring-only-false-negatives]] — `searchWiki` was pure substring match, so multi-word queries returned false \"nothing found\" results; fixed with tokenized AND matching + ranked partial fallback, v0.15.0
 - [[gotchas/unregistered-project-search-silent-fallback]] — an unregistered project + no `@` selector makes MCP search fail, and the calling agent can silently substitute its own native search instead of surfacing the error
+- [[gotchas/mcp-consolidate-stale-done-status]] — MCP `memoria_consolidate` could return a stale `done` status instead of respawning when new ended-session work was pending; fixed in PR #16, v0.16.0
 
 ## Sessions — the episodic log
 
@@ -98,4 +100,4 @@ Start with [[concepts/architecture-overview]] for the pipeline end to end.
 - [[sessions/de6b74fc-4caf-4133-ab00-ee307afe6d78]] — `memoria status` restyled as a lipgloss table (PR #5, unmerged, version bumped to 0.10.0); no-AI-attribution rule set after a PR body correction
 - [[sessions/acbf5d0d-d82b-4852-98fc-97cfbfb5da35]] — PR #9 closed as redundant (fix already on main via `8c0432e`); ai-memory Q&A on SQLite/FTS5/link-neighbor/decay; `lastUsed` session-page decay shipped, PR #10 (open, not approved), version bumped to 0.12.0
 - [[sessions/075393cf-e94c-4b79-a4c5-4feec580aa66]] — cross-project search selectors + MCP trust rewrite shipped: PR #12 (v0.12.1→0.13.0)
-- [[sessions/b83a5def-41be-43be-82b5-902466d6a5e6]] — friend's CE-project search bug diagnosed (unregistered clone + substring-only search) and fixed: tokenized multi-word search shipped, v0.15.0
+- [[sessions/b83a5def-41be-43be-82b5-902466d6a5e6]] — friend's CE-project search bug diagnosed (unregistered clone + substring-only search) and fixed: tokenized multi-word search shipped as PR #15 (v0.15.0); MCP consolidate stale-status bug fixed and MCP auto-trust shipped as PR #16 (v0.16.0)

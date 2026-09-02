@@ -180,6 +180,28 @@ func TestInitInteractiveMultiSelect(t *testing.T) {
 	}
 }
 
+func TestInitTrustsMCPByDefault(t *testing.T) {
+	home, _ := initEnv(t)
+	if code, out := runInitCmd(t, "claude-code", "--processor", "ollama"); code != 0 {
+		t.Fatalf("init = %d: %s", code, out)
+	}
+	settings := readSettings(t, filepath.Join(home, ".claude", "settings.json"))
+	if rules := allowRules(t, settings); len(rules) != 1 || rules[0] != "mcp__memoria" {
+		t.Fatalf("allow = %v, want [mcp__memoria]", rules)
+	}
+}
+
+func TestInitTrustFalseSkipsAllowRule(t *testing.T) {
+	home, _ := initEnv(t)
+	if code, out := runInitCmd(t, "claude-code", "--processor", "ollama", "--trust=false"); code != 0 {
+		t.Fatalf("init --trust=false = %d: %s", code, out)
+	}
+	settings := readSettings(t, filepath.Join(home, ".claude", "settings.json"))
+	if rules := allowRules(t, settings); len(rules) != 0 {
+		t.Fatalf("allow = %v, want none", rules)
+	}
+}
+
 func TestInitRejectsUnknownProcessor(t *testing.T) {
 	initEnv(t)
 	code, out := runInitCmd(t, "claude-code", "--processor", "gpt5")
