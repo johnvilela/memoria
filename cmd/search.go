@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -11,7 +12,7 @@ import (
 	"strings"
 )
 
-// runSearch finds wiki pages by content substring, or by frontmatter tag when
+// runSearch finds wiki pages by content terms, or by frontmatter tag when
 // the query starts with '#', then lets the user pick one to print. Resolves
 // like the MCP tools: project wiki inside a tracked project, global wiki
 // elsewhere when global mode is on — unless the query leads with @project /
@@ -102,6 +103,9 @@ type workspace struct{ name, wikiRoot string }
 func searchWorkspaces(cwd, configPath string, sels []string) ([]workspace, error) {
 	if len(sels) == 0 {
 		_, _, name, wikiRoot, err := resolveWorkspace(cwd, configPath)
+		if errors.Is(err, errNotTracked) {
+			return nil, errors.New("not inside a tracked project (search with @all or @<project>, or run memoria bootstrap first)")
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -154,21 +158,26 @@ func searchWorkspaces(cwd, configPath string, sels []string) ([]workspace, error
 // print and the owning wikiRoot so touchLastUsed stamps the right wiki.
 type searchHit struct {
 	project, wikiRoot, path, content string
-	score                            int
+	terms, score                     int
 }
 
 // searchHits runs the query over every workspace and merges the results into
-// one relevance-ranked list (score desc, then path, then project).
+// one relevance-ranked list (terms desc, score desc, then path, then
+// project). When any page matched every term, the partial matches are noise
+// and the list is cut down to the full matches.
 func searchHits(wss []workspace, query string, trash bool) []searchHit {
 	var hits []searchHit
 	for _, ws := range wss {
 		wiki := readWikiTrash(ws.wikiRoot, trash)
 		for _, h := range searchWiki(wiki, query) {
-			hits = append(hits, searchHit{ws.name, ws.wikiRoot, h.path, wiki[h.path], h.score})
+			hits = append(hits, searchHit{ws.name, ws.wikiRoot, h.path, wiki[h.path], h.terms, h.score})
 		}
 	}
 	sort.Slice(hits, func(i, j int) bool {
 		a, b := hits[i], hits[j]
+		if a.terms != b.terms {
+			return a.terms > b.terms
+		}
 		if a.score != b.score {
 			return a.score > b.score
 		}
@@ -177,6 +186,13 @@ func searchHits(wss []workspace, query string, trash bool) []searchHit {
 		}
 		return a.project < b.project
 	})
+	if want := len(queryTerms(query)); len(hits) > 0 && hits[0].terms == want {
+		for i, h := range hits {
+			if h.terms < want {
+				return hits[:i]
+			}
+		}
+	}
 	return hits
 }
 
@@ -192,35 +208,61 @@ func readWikiTrash(root string, includeTrash bool) map[string]string {
 	return wiki
 }
 
-// scoredHit ranks a match: occurrence count for substrings, 1 for tag hits.
+// scoredHit ranks a match: terms is how many distinct query terms the page
+// contains, score the total occurrences; a tag hit pins both to 1.
 type scoredHit struct {
-	path  string
-	score int
+	path         string
+	terms, score int
+}
+
+// queryTerms splits a query into deduped lowercase terms; a #tag query is
+// one opaque term.
+func queryTerms(query string) []string {
+	if strings.HasPrefix(query, "#") {
+		return []string{query}
+	}
+	fields := strings.Fields(strings.ToLower(query))
+	slices.Sort(fields)
+	return slices.Compact(fields)
 }
 
 // searchWiki returns the wiki-relative paths matching the query, ranked by
-// score (desc) with alphabetical tie-break. '#tag' matches whole frontmatter
-// tags; anything else is a case-insensitive content substring.
+// distinct terms matched (desc), then total occurrences (desc), then path.
+// '#tag' matches whole frontmatter tags; anything else is split into
+// case-insensitive substring terms — any term matches a page, and pages
+// containing every term rank first (searchHits drops the partials when a
+// full match exists).
 func searchWiki(wiki map[string]string, query string) []scoredHit {
 	var hits []scoredHit
 	if tag, isTag := strings.CutPrefix(query, "#"); isTag {
 		for path, content := range wiki {
 			for _, t := range pageTags(content) {
 				if strings.EqualFold(t, tag) {
-					hits = append(hits, scoredHit{path, 1})
+					hits = append(hits, scoredHit{path, 1, 1})
 					break
 				}
 			}
 		}
 	} else {
-		q := strings.ToLower(query)
+		terms := queryTerms(query)
 		for path, content := range wiki {
-			if n := strings.Count(strings.ToLower(content), q); n > 0 {
-				hits = append(hits, scoredHit{path, n})
+			c := strings.ToLower(content)
+			matched, occ := 0, 0
+			for _, t := range terms {
+				if n := strings.Count(c, t); n > 0 {
+					matched++
+					occ += n
+				}
+			}
+			if matched > 0 {
+				hits = append(hits, scoredHit{path, matched, occ})
 			}
 		}
 	}
 	sort.Slice(hits, func(i, j int) bool {
+		if hits[i].terms != hits[j].terms {
+			return hits[i].terms > hits[j].terms
+		}
 		if hits[i].score != hits[j].score {
 			return hits[i].score > hits[j].score
 		}

@@ -53,6 +53,57 @@ func TestSearchWikiSubstring(t *testing.T) {
 	}
 }
 
+func TestSearchWikiMultiWord(t *testing.T) {
+	wiki := map[string]string{
+		"both.md":    "Rocket FUEL burns\n",
+		"single.md":  "rocket rocket rocket\n",
+		"neither.md": "nothing here\n",
+	}
+	got := searchWiki(wiki, "rocket fuel")
+	if len(got) != 2 || got[0].path != "both.md" || got[1].path != "single.md" {
+		t.Fatalf("multi-word = %v, want both.md (all terms) above single.md (partial, more occurrences)", got)
+	}
+}
+
+func TestRunSearchMultiWordAND(t *testing.T) {
+	proj, cfgPath := searchFixture(t)
+	stubTTY(t, false)
+	var buf bytes.Buffer
+	if code := runSearch(proj, cfgPath, []string{"burns", "engine"}, &buf); code != 0 {
+		t.Fatalf("multi-word = %d, want 0: %s", code, buf.String())
+	}
+	if !strings.Contains(buf.String(), "the rocket engine burns fuel") {
+		t.Fatalf("page with all terms should be the only hit: %q", buf.String())
+	}
+}
+
+func TestRunSearchMultiWordFallback(t *testing.T) {
+	proj, cfgPath := searchFixture(t)
+	stubTTY(t, false)
+	var buf bytes.Buffer
+	if code := runSearch(proj, cfgPath, []string{"engine", "sqlite", "welcome"}, &buf); code != 0 {
+		t.Fatalf("partial-only = %d, want 0: %s", code, buf.String())
+	}
+	// no page has all three terms → every partial match, ranked by
+	// occurrences (engine.md has 3 "engine" hits) then path
+	want := "concepts/engine.md\ndecisions/queue.md\ngotchas/hashtags.md\nindex.md\n"
+	if got := buf.String(); got != want {
+		t.Fatalf("fallback listing = %q, want %q", got, want)
+	}
+}
+
+func TestRunSearchAllMultiWordFiltersAcrossProjects(t *testing.T) {
+	alpha, _, cfgPath := crossFixture(t)
+	stubTTY(t, false)
+	var buf bytes.Buffer
+	if code := runSearch(alpha, cfgPath, []string{"@all", "hums", "engine"}, &buf); code != 0 {
+		t.Fatalf("@all multi-word = %d, want 0: %s", code, buf.String())
+	}
+	if !strings.Contains(buf.String(), "the engine hums") || strings.Contains(buf.String(), "alpha:") {
+		t.Fatalf("beta's full match should drop alpha's partial: %q", buf.String())
+	}
+}
+
 func TestSearchWikiHashtag(t *testing.T) {
 	wiki := map[string]string{
 		"tagged.md":  "---\ntags: [engine, rocket]\n---\n\n# T\n\nbody\n",
@@ -363,6 +414,9 @@ func TestRunSearchOutsideProject(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), "not inside a tracked project") {
 		t.Fatalf("output = %q", buf.String())
+	}
+	if !strings.Contains(buf.String(), "@all") {
+		t.Fatalf("error should point at the @all selector escape hatch: %q", buf.String())
 	}
 }
 

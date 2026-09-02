@@ -10,7 +10,7 @@ Start with [[concepts/architecture-overview]] for the pipeline end to end.
 - [[concepts/session-capture]] — hooks, live digests, session titles, implicit session end, incarnations
 - [[concepts/consolidation-pipeline]] — `process`, JSON proposal, lint, cron timer
 - [[concepts/mcp-server]] — the seven MCP tools agents get; `memoria_recall` is the read-only recall path; server-level Instructions + trust-rewritten tool descriptions since PR #12 (v0.13.0)
-- [[concepts/cross-project-search]] — `@project`/`@all` selectors let `memoria search` and MCP `memoria_search` reach sibling projects' wikis — shipped PR #12, v0.13.0
+- [[concepts/cross-project-search]] — `@project`/`@all` selectors let `memoria search` and MCP `memoria_search` reach sibling projects' wikis — shipped PR #12, v0.13.0; multi-word matching fixed from substring-only to tokenized AND + ranked fallback in v0.15.0
 - [[concepts/init-setup-multi-agent]] — multi-agent hook/MCP install, the `clients:` registry in config
 - [[concepts/recall-and-run]] — bootstrap, AGENTS.md recall block, `run`'s session picker + cross-harness handoff packet (ask-first since `6414c80`), `search`
 - [[concepts/multirepo-parent-project]] — how memoria behaves on a multirepo parent folder; the eparts verdict — adaptations shipped as `31b7251`
@@ -21,7 +21,7 @@ Start with [[concepts/architecture-overview]] for the pipeline end to end.
 - [[concepts/wiki-auto-commit]] — how wiki commits are built; opt-in for applies, always for `memoria commit`
 - [[concepts/queue-write-safety]] — file locking and atomic operations protect queue and status files from concurrent writes
 - [[concepts/ci-release-pipeline]] — GitHub Actions CI/release pipeline: version-check gate, auto-tag + auto-release on merge, gotestsum vitest-style test output — shipped v0.8.0/v0.8.1
-- [[concepts/self-update-command]] — `memoria update`: checks GitHub releases, checksum-verifies, self-replaces the running binary; release binaries trimmed ~15MB→~10MB via `-ldflags="-s -w"` — shipped on `feat/update-command`, no PR yet
+- [[concepts/self-update-command]] — `memoria update`: checks GitHub releases, checksum-verifies, self-replaces the running binary; release binaries trimmed ~15MB→~10MB via `-ldflags=\"-s -w\"` — shipped on `feat/update-command`, no PR yet
 - [[concepts/status-table]] — `memoria status` renders as a borderless lipgloss table instead of prose lines — shipped on `feat/status-table`, PR #5 (open, not approved), version bumped to 0.10.0
 - [[concepts/session-decay]] — `lastUsed` date stamps on `sessions/` pages: deterministic touch-on-delivery, cron-swept soft-delete (15d) / hard-delete (30d) — shipped `82490e0`, PR #10 (open, not approved), version bumped to 0.12.0
 - [[research/ai-memory-workstream-comparison]] — external (chatgpt) deep-dive on ai-memory v1.19.2 that fed the `run` rework
@@ -59,6 +59,8 @@ Start with [[concepts/architecture-overview]] for the pipeline end to end.
 - [[gotchas/subagent-stop-promoted-to-user-request]] — handoff auto-ran a subagent's internal note; ask-first since `6414c80`
 - [[gotchas/codex-refuses-untrusted-directories]] — codex exec refuses to run outside git repos or trusted paths; fixed in `dc9c30f`
 - [[gotchas/processor-json-parse-failures]] — cheap-model quote-escaping bugs silently poisoned whole consolidation batches; fixed by deterministic repair in `6f653b9`
+- [[gotchas/search-substring-only-false-negatives]] — `searchWiki` was pure substring match, so multi-word queries returned false \"nothing found\" results; fixed with tokenized AND matching + ranked partial fallback, v0.15.0
+- [[gotchas/unregistered-project-search-silent-fallback]] — an unregistered project + no `@` selector makes MCP search fail, and the calling agent can silently substitute its own native search instead of surfacing the error
 
 ## Sessions — the episodic log
 
@@ -75,8 +77,8 @@ Start with [[concepts/architecture-overview]] for the pipeline end to end.
 - [[sessions/019fb0a0-48d0-71f1-954f-7036553b2133]] — handoff packet dogfooded: codex resumes the claude-code session
 - [[sessions/6d290df9-cc9e-4703-bcc4-2143eba007aa]] — handoff round-trip: claude-code resumes the codex session; obsidian ignore committed (`c0ee15d`)
 - [[sessions/7facd470-c6e9-489b-b490-58832dabc6e2]] — claude session titles captured into digests and the run picker (`c2e7e3a`), plus prompts moved to `cmd/memoria/prompts/` (`c478df6`)
-- [[sessions/019fb0c0-23aa-7583-9035-ad2d71dd4ac6]] — wiki committed as `147ed73` over a packet handoff; "what did we do?" answered from the session's own page
-- [[sessions/67c500e5-dc86-4a64-8e79-a76444932b79]] — `memoria_recall` shipped (`d6edeea`): read-only "what did we do?" answers, digest rerouted
+- [[sessions/019fb0c0-23aa-7583-9035-ad2d71dd4ac6]] — wiki committed as `147ed73` over a packet handoff; \"what did we do?\" answered from the session's own page
+- [[sessions/67c500e5-dc86-4a64-8e79-a76444932b79]] — `memoria_recall` shipped (`d6edeea`): read-only \"what did we do?\" answers, digest rerouted
 - [[sessions/019fb0d1-0ea2-71c3-a0c2-616d5973374c]] — deferred wiki commit lands as `4d9171a` over a fourth packet handoff; recall question answered write-free
 - [[sessions/e112664f-9954-4d8e-8fd2-a11e13d66bc0]] — handoff made ask-first (`6414c80`); multirepo assessment for eparts, adaptations committed as `31b7251` in incarnation 2
 - [[sessions/c133e40b-8547-4a99-bc98-d14b7029ccfe]] — codex git-trust fix, processor model config, wiki auto-commit — `dc9c30f` + `f0bf53a`
@@ -92,7 +94,8 @@ Start with [[concepts/architecture-overview]] for the pipeline end to end.
 - [[sessions/19c76dfd-1284-48fa-bbba-486b6f7d66f0]] — `--global`/`--global-path` bootstrap flags requested; recon only, no decision yet → implemented the same day as `8e495d5` ([[sessions/266a3d10-ad0c-44f1-86f7-379941908fbf]])
 - [[sessions/266a3d10-ad0c-44f1-86f7-379941908fbf]] — global capture mode shipped: `8e495d5` — `bootstrap --global`/`--global-path`, `setup --global`, `_global` pseudo-project
 - [[sessions/e7535e5e-c210-4029-8496-3ab3c84ea9dd]] — release pipeline shipped: v0.8.0 (CI/CD + branch protection) and v0.8.1 (vitest-style test output)
-- [[sessions/6f2b7832-1db8-4e7a-a2c0-ca0cc207e4c8]] — `memoria update` self-update command + release-binary install script shipped on `feat/update-command` (no PR yet); release binaries trimmed ~15MB→~10MB via `-ldflags="-s -w"`
+- [[sessions/6f2b7832-1db8-4e7a-a2c0-ca0cc207e4c8]] — `memoria update` self-update command + release-binary install script shipped on `feat/update-command` (no PR yet); release binaries trimmed ~15MB→~10MB via `-ldflags=\"-s -w\"`
 - [[sessions/de6b74fc-4caf-4133-ab00-ee307afe6d78]] — `memoria status` restyled as a lipgloss table (PR #5, unmerged, version bumped to 0.10.0); no-AI-attribution rule set after a PR body correction
 - [[sessions/acbf5d0d-d82b-4852-98fc-97cfbfb5da35]] — PR #9 closed as redundant (fix already on main via `8c0432e`); ai-memory Q&A on SQLite/FTS5/link-neighbor/decay; `lastUsed` session-page decay shipped, PR #10 (open, not approved), version bumped to 0.12.0
 - [[sessions/075393cf-e94c-4b79-a4c5-4feec580aa66]] — cross-project search selectors + MCP trust rewrite shipped: PR #12 (v0.12.1→0.13.0)
+- [[sessions/b83a5def-41be-43be-82b5-902466d6a5e6]] — friend's CE-project search bug diagnosed (unregistered clone + substring-only search) and fixed: tokenized multi-word search shipped, v0.15.0

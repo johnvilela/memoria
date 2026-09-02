@@ -14,7 +14,7 @@ Before this, `memoria search` (CLI) and the MCP `memoria_search` tool both resol
 
 Lead the query with `@<project-name>` tokens (repeatable) or `@all`:
 
-- `memoria search @beta queue` / MCP `query: "@beta queue"` — search project `beta` by name.
+- `memoria search @beta queue` / MCP `query: \"@beta queue\"` — search project `beta` by name.
 - `@proj1 @proj2 term` — search multiple named projects.
 - `@all term` — search every registered project; overrides other selectors; includes the `_global` pseudo-project ([[concepts/global-capture-mode]]) when global mode is on.
 - An unknown project name errors, listing all known project names — usable by both a human and a self-correcting agent.
@@ -24,7 +24,13 @@ One parser, two callers: `splitSelectors`/`searchWorkspaces` (new, `cmd/search.g
 
 ## Ranking
 
-`searchWiki` was reshaped from a flat "does it contain the text" boolean into scored hits: score is the substring occurrence count (`strings.Count`), a `#tag` match scores 1; hits sort by score descending, then path ascending. When multiple workspaces are searched, all their hits merge into one ranked list, so the best match leads regardless of which project it came from.
+`searchWiki` was originally reshaped from a flat \"does it contain the text\" boolean into scored hits: score was the substring occurrence count (`strings.Count`), a `#tag` match scored 1; hits sort by score descending, then path ascending. When multiple workspaces are searched, all their hits merge into one ranked list, so the best match leads regardless of which project it came from.
+
+**Superseded by a later fix**: substring-occurrence scoring had a false-negative bug — a multi-word query only matched pages containing that exact phrase verbatim, so relevant pages could score zero even when every individual word matched. See the follow-up below.
+
+## Tokenized multi-word matching (v0.15.0 follow-up)
+
+Hit for real: a user's agent ran a multi-word query against a populated wiki and got zero hits, because the exact phrase never appeared verbatim, even though the individual terms matched several pages — full incident in [[gotchas/search-substring-only-false-negatives]]. Fixed (commit `feat(search): match multi-word queries as terms with ranked partial fallback`, branch `feat/tokenized-search`, version **0.14.0 → 0.15.0**): `searchWiki` now tokenizes the query into terms, ranking pages that match every term (AND) as the primary tier, with a ranked partial-term fallback when no page contains all of them. The fix sits in the same shared `searchWiki`, so it applies uniformly to plain queries, `@project`/`@all` selector queries, and the MCP tool.
 
 ## Output format
 
@@ -42,4 +48,4 @@ A selector search labels and lists hits as `project:path` — deliberately match
 
 TDD throughout (tests written and confirmed red first). Full suite green under `go vet`/`go test`. Live smoke test against the real registered-project config: `./memoria search @all memoria` returned a ranked cross-project list; `./memoria search @nope x` errored listing all 7 registered project names.
 
-Related: [[concepts/mcp-server]] (the trust-rewrite that shipped as this PR's second commit), [[concepts/global-capture-mode]] (`_global`, reached via `@all`).
+Related: [[concepts/mcp-server]] (the trust-rewrite that shipped as this PR's second commit), [[concepts/global-capture-mode]] (`_global`, reached via `@all`), [[gotchas/search-substring-only-false-negatives]] and [[gotchas/unregistered-project-search-silent-fallback]] (the incident that motivated the v0.15.0 follow-up).
