@@ -18,8 +18,10 @@ Called from both `memoria init` and `memoria setup` (6 edits to `init.go`, 2 to 
 
 ## Status
 
-Version bumped **0.15.0 → 0.16.0**; AGENTS.md updated. Committed as `fix(mcp): respawn consolidate past stale done status; auto-allow memoria tools on init` on branch `fix/mcp-consolidate-trust` (branched from the `feat/tokenized-search` checkout), bundled with the [[gotchas/mcp-consolidate-stale-done-status]] fix in the same commit. Pushed and opened as **PR #16**, stacked on PR #15 ([[concepts/cross-project-search]]'s branch) via `gh pr create --base feat/tokenized-search` — it retargets `main` automatically once #15 merges.
+Version bumped **0.15.0 → 0.16.0**; AGENTS.md updated. Committed as `fix(mcp): respawn consolidate past stale done status; auto-allow memoria tools on init` on branch `fix/mcp-consolidate-trust` (branched from the `feat/tokenized-search` checkout), bundled with the [[gotchas/mcp-consolidate-stale-done-status]] fix in the same commit. First pushed and opened as PR #16, stacked on PR #15 ([[concepts/cross-project-search]]'s branch) via `gh pr create --base feat/tokenized-search`, on the assumption it would retarget to `main` automatically once #15 merged — it did not.
+
+**PR #16 landed on a dead branch**: #15 squash-merged into main first; when #16 later merged, it updated only the now-orphaned `feat/tokenized-search` branch, never main — main stayed at 0.15.0 with no `installTrust`. The same three commits (unchanged) were cherry-picked onto a fresh branch cut from `origin/main` and re-opened as **PR #17**, base `main` — squash-merged into main on 2026-09-02 as `4588769`. Full incident and the general lesson: [[gotchas/stacked-pr-lands-on-dead-branch]].
 
 ## Related
 
-[[concepts/mcp-server]] (the seven tools and the trust rewrite this extends), [[concepts/init-setup-multi-agent]] (the install/setup flow this is wired into), [[gotchas/mcp-consolidate-stale-done-status]] (the bug fixed in the same commit).
+[[concepts/mcp-server]] (the seven tools and the trust rewrite this extends), [[concepts/init-setup-multi-agent]] (the install/setup flow this is wired into), [[gotchas/mcp-consolidate-stale-done-status]] (the bug fixed in the same commit), [[gotchas/stacked-pr-lands-on-dead-branch]] (why a second PR was needed).

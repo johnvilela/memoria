@@ -12,8 +12,12 @@ The ready predicate in `mcpConsolidate` (`cmd/mcp.go`) accepted *any* `done` sta
 
 ## Fix
 
-Shipped on branch `fix/mcp-consolidate-trust` → PR #16 (stacked on PR #15), bundled with [[concepts/mcp-auto-trust]] in the same commit: `fix(mcp): respawn consolidate past stale done status; auto-allow memoria tools on init`. Only an unconsumed `proposal.json` now counts as \"ready\" in the spawn path, so the job respawns past the stale `done` slot instead of trusting it; the done+\"applied\" acceptance moved to the nothing-pending branch, where it's still the correct report for a genuine auto-apply outcome. Pinned by a new `TestMCPConsolidateStaleDoneRespawns` test (written and confirmed red first); full suite (414 tests) green under `go vet` + `-race` afterward.
+Only an unconsumed `proposal.json` now counts as \"ready\" in the spawn path, so the job respawns past the stale `done` slot instead of trusting it; the done+\"applied\" acceptance moved to the nothing-pending branch, where it's still the correct report for a genuine auto-apply outcome. Pinned by a new `TestMCPConsolidateStaleDoneRespawns` test (written and confirmed red first); full suite (414 tests) green under `go vet` + `-race` afterward.
+
+Bundled with [[concepts/mcp-auto-trust]] in the same commit: `fix(mcp): respawn consolidate past stale done status; auto-allow memoria tools on init`, first shipped on branch `fix/mcp-consolidate-trust` and opened as PR #16 stacked on PR #15 (`gh pr create --base feat/tokenized-search`).
+
+**PR #16 never reached main**: PR #15 squash-merged into main before #16 merged, and #16's merge landed on the now-orphaned `feat/tokenized-search` branch instead — main stayed at 0.15.0 with none of this fix. The same three commits were cherry-picked onto a fresh branch off main and re-opened as **PR #17** (base `main`), squash-merged into main on 2026-09-02 as `4588769`. Full incident: [[gotchas/stacked-pr-lands-on-dead-branch]].
 
 ## Related
 
-[[concepts/mcp-server]] (the `memoria_consolidate` tool and its one-job-per-project polling contract), [[decisions/0003-never-block-the-agent]] (why consolidate is a detached, poll-based job in the first place), [[concepts/mcp-auto-trust]] (shipped in the same commit/PR).
+[[concepts/mcp-server]] (the `memoria_consolidate` tool and its one-job-per-project polling contract), [[decisions/0003-never-block-the-agent]] (why consolidate is a detached, poll-based job in the first place), [[concepts/mcp-auto-trust]] (shipped in the same commit/PR), [[gotchas/stacked-pr-lands-on-dead-branch]] (why the fix needed a second PR).
