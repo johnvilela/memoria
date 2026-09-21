@@ -34,6 +34,8 @@ var commands = []command{
 	{name: "mcp", desc: "Serve the memoria tools to code agents over stdio", internal: true},
 	{name: "status", desc: "Show background processing state per project"},
 	{name: "list", desc: "List registered projects — name, wiki folder, and whether the path still exists"},
+	{name: "guide", desc: "Show every registered wiki path with status, page count, and a short summary"},
+	{name: "disable", desc: "Remove all memoria capture hooks and stop scheduled processing; keep MCP access and data"},
 	{name: "bootstrap", desc: "Register current folder as a tracked project and seed the wiki from git history (--wiki <name>, --background); an existing wiki folder is adopted as-is; --global [--global-path <folder>] captures unregistered folders too"},
 	{name: "remove", desc: "Pick a registered project and remove it from memoria (config and pending/status state; project files untouched)"},
 	{name: "update", desc: "Check GitHub for a newer release and replace this binary (-y installs without asking)"},

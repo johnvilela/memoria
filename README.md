@@ -64,6 +64,8 @@ memoria run codex          # launch an agent, pick a session to continue
 | `commit [-m "subject"]` | Commit the project's wiki folder — new and modified pages only, message in the same `docs(wiki): ...` shape, your other staged files untouched |
 | `status` | Show background processing state per project (running / done / error) |
 | `list` | List registered projects — name, wiki folder, and whether the path still exists |
+| `guide` | Show every registered project/global wiki with its absolute path, status, active Markdown page count, and a short summary from `index.md` (or a category summary when no description exists). Only registered wikis are inspected; the filesystem is never scanned |
+| `disable` | Remove every memoria capture hook from Claude Code and Codex and stop/remove the memoria scheduler. Safe to run repeatedly; preserves foreign hooks, MCP read access, project registrations, session data, and every wiki |
 | `update [-y]` | Check GitHub for a newer release; shows the version and changelog, asks to install, then replaces the binary in place (sha256-verified). `-y` skips the prompt (and is the non-interactive path) |
 | `mcp` | Internal — stdio MCP server for agents (see below) |
 | `digest <sid>` | Internal — compile one session's digest into its `sessions/<sid>.md` wiki page |

@@ -8,7 +8,7 @@ import (
 )
 
 // version is bumped by hand on release, together with the matching git tag.
-const version = "0.16.0"
+const version = "0.17.0"
 
 func run(args []string, stdin io.Reader, out io.Writer) int {
 	arg := ""
@@ -107,6 +107,10 @@ func run(args []string, stdin io.Reader, out io.Writer) int {
 		return runStatus(defaultConfigPath(), out)
 	case "list":
 		return runList(defaultConfigPath(), out)
+	case "guide":
+		return runGuide(defaultConfigPath(), out)
+	case "disable":
+		return runDisable(defaultConfigPath(), out)
 	case "remove":
 		return runRemove(defaultConfigPath(), out)
 	case "update":
